@@ -1,11 +1,18 @@
-// If using a .env file, uncomment the line below
-import 'dotenv/config';
+// index.js
 
+// Import necessary modules
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import 'dotenv/config';
 import { RealtimeClient } from '@openai/realtime-api-beta';
 import { functionSchemas } from './schemas.js';
 
+// Define __filename and __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Initialize the client
 const client = new RealtimeClient({ apiKey: process.env.OPENAI_API_KEY });
 
 // Read assistant_prompt.txt
