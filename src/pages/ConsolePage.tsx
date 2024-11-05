@@ -17,6 +17,7 @@ import { RealtimeClient } from '@openai/realtime-api-beta';
 import { ItemType } from '@openai/realtime-api-beta/dist/lib/client.js';
 import { WavRecorder, WavStreamPlayer } from '../lib/wavtools/index.js';
 import { instructions } from '../utils/conversation_config.js';
+import { functionSchemas } from '../utils/schemas.js';
 import { WavRenderer } from '../utils/wav_renderer';
 
 import { X, Edit, Zap, ArrowUp, ArrowDown } from 'react-feather';
@@ -381,79 +382,30 @@ export function ConsolePage() {
     // Set transcription, otherwise we don't get user transcriptions back
     client.updateSession({ input_audio_transcription: { model: 'whisper-1' } });
 
-    // Add tools
-    client.addTool(
-      {
-        name: 'set_memory',
-        description: 'Saves important data about the user into memory.',
-        parameters: {
-          type: 'object',
-          properties: {
-            key: {
-              type: 'string',
-              description:
-                'The key of the memory value. Always use lowercase and underscores, no other characters.',
-            },
-            value: {
-              type: 'string',
-              description: 'Value can be anything represented as a string',
-            },
-          },
-          required: ['key', 'value'],
-        },
-      },
-      async ({ key, value }: { [key: string]: any }) => {
-        setMemoryKv((memoryKv) => {
-          const newKv = { ...memoryKv };
-          newKv[key] = value;
-          return newKv;
-        });
-        return { ok: true };
-      }
-    );
-    client.addTool(
-      {
-        name: 'get_weather',
-        description:
-          'Retrieves the weather for a given lat, lng coordinate pair. Specify a label for the location.',
-        parameters: {
-          type: 'object',
-          properties: {
-            lat: {
-              type: 'number',
-              description: 'Latitude',
-            },
-            lng: {
-              type: 'number',
-              description: 'Longitude',
-            },
-            location: {
-              type: 'string',
-              description: 'Name of the location',
-            },
-          },
-          required: ['lat', 'lng', 'location'],
-        },
-      },
-      async ({ lat, lng, location }: { [key: string]: any }) => {
-        setMarker({ lat, lng, location });
-        setCoords({ lat, lng, location });
-        const result = await fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,wind_speed_10m`
-        );
-        const json = await result.json();
-        const temperature = {
-          value: json.current.temperature_2m as number,
-          units: json.current_units.temperature_2m as string,
-        };
-        const wind_speed = {
-          value: json.current.wind_speed_10m as number,
-          units: json.current_units.wind_speed_10m as string,
-        };
-        setMarker({ lat, lng, location, temperature, wind_speed });
-        return json;
-      }
-    );
+    // Add function tools from functionSchemas
+    functionSchemas.forEach((tool) => {
+      client.addTool(tool, async (args: { [key: string]: any }) => {
+        // Implement function handler
+        const functionName = tool.name;
+        switch (functionName) {
+          case 'add_pickmove_task':
+            console.log('Executing add_pickmove_task with args:', args);
+            // Simulate processing
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            return { message: 'PickMove task added successfully.' };
+          case 'add_pour_task':
+            console.log('Executing add_pour_task with args:', args);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            return { message: 'Pour task added successfully.' };
+          case 'add_return_task':
+            console.log('Executing add_return_task with args:', args);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            return { message: 'Return task added successfully.' };
+          default:
+            return { error: `Unknown function: ${functionName}` };
+        }
+      });
+    });
 
     // handle realtime events from client + server for event logging
     client.on('realtime.event', (realtimeEvent: RealtimeEvent) => {
@@ -478,6 +430,35 @@ export function ConsolePage() {
     });
     client.on('conversation.updated', async ({ item, delta }: any) => {
       const items = client.conversation.getItems();
+
+      if (item.type === 'function_call' && item.status === 'completed') {
+        const functionName = item.name;
+        const functionArguments = JSON.parse(item.arguments);
+
+        console.log(`Assistant called function: ${functionName}`);
+        console.log('With arguments:', functionArguments);
+
+        // Handle the function call
+        let functionResult;
+        try {
+          functionResult = await handleFunctionCall(functionName, functionArguments);
+        } catch (error: any) {
+          functionResult = { error: error.message };
+        }
+
+        // Send the function result back to the assistant
+        client.realtime.send('conversation.item.create', {
+          item: {
+            type: 'function_call_output',
+            call_id: item.id,
+            output: JSON.stringify(functionResult),
+          },
+        });
+
+        // Trigger the assistant to generate the next response
+        client.realtime.send('response.create', {});
+      }
+
       if (delta?.audio) {
         wavStreamPlayer.add16BitPCM(delta.audio, item.id);
       }
@@ -499,6 +480,27 @@ export function ConsolePage() {
       client.reset();
     };
   }, []);
+
+  // Implement your function logic here
+  async function handleFunctionCall(functionName: string, functionArguments: { [key: string]: any }) {
+    switch (functionName) {
+      case 'add_pickmove_task':
+        console.log('Executing add_pickmove_task with args:', functionArguments);
+        // Simulate processing
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return { message: 'PickMove task added successfully.' };
+      case 'add_pour_task':
+        console.log('Executing add_pour_task with args:', functionArguments);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return { message: 'Pour task added successfully.' };
+      case 'add_return_task':
+        console.log('Executing add_return_task with args:', functionArguments);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return { message: 'Return task added successfully.' };
+      default:
+        return { error: `Unknown function: ${functionName}` };
+    }
+  }
 
   /**
    * Render the application
@@ -577,9 +579,9 @@ export function ConsolePage() {
                             <ArrowDown />
                           )}
                           <span>
-                            {event.type === 'error'
-                              ? 'error!'
-                              : realtimeEvent.source}
+                            {realtimeEvent.source === 'client'
+                              ? 'client'
+                              : 'server'}
                           </span>
                         </div>
                         <div className="event-type">
