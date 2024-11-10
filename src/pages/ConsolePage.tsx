@@ -1,32 +1,17 @@
-/**
- * Running a local relay server will allow you to hide your API key
- * and run custom logic on the server
- *
- * Set the local relay server address to:
- * REACT_APP_LOCAL_RELAY_SERVER_URL=http://localhost:8081
- *
- * This will also require you to set OPENAI_API_KEY= in a `.env` file
- * You can run it with `npm run relay`, in parallel with `npm start`
- */
-const LOCAL_RELAY_SERVER_URL: string =
-  process.env.REACT_APP_LOCAL_RELAY_SERVER_URL || '';
+// ConsolePage.tsx
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-
-import { RealtimeClient } from '@openai/realtime-api-beta';
-import { ItemType } from '@openai/realtime-api-beta/dist/lib/client.js';
 import { WavRecorder, WavStreamPlayer } from '../lib/wavtools/index.js';
-import { instructions } from '../utils/conversation_config.js';
-import { functionSchemas } from '../utils/schemas.js';
 import { WavRenderer } from '../utils/wav_renderer';
 
-import { X, Edit, Zap, ArrowUp, ArrowDown } from 'react-feather';
+import { X, Zap, ArrowUp, ArrowDown } from 'react-feather';
 import { Button } from '../components/button/Button';
 import { Toggle } from '../components/toggle/Toggle';
 import { Map } from '../components/Map';
 
 import './ConsolePage.scss';
-import { isJsxOpeningLikeElement } from 'typescript';
+
+import ReconnectingWebSocket from 'reconnecting-websocket';
 
 /**
  * Type for result from get_weather() function call
@@ -57,23 +42,10 @@ interface RealtimeEvent {
 
 export function ConsolePage() {
   /**
-   * Ask user for API Key
-   * If we're using the local relay server, we don't need this
-   */
-  const apiKey = LOCAL_RELAY_SERVER_URL
-    ? ''
-    : localStorage.getItem('tmp::voice_api_key') ||
-      prompt('OpenAI API Key') ||
-      '';
-  if (apiKey !== '') {
-    localStorage.setItem('tmp::voice_api_key', apiKey);
-  }
-
-  /**
    * Instantiate:
    * - WavRecorder (speech input)
    * - WavStreamPlayer (speech output)
-   * - RealtimeClient (API client)
+   * - WebSocket client to relay server
    */
   const wavRecorderRef = useRef<WavRecorder>(
     new WavRecorder({ sampleRate: 24000 })
@@ -81,16 +53,8 @@ export function ConsolePage() {
   const wavStreamPlayerRef = useRef<WavStreamPlayer>(
     new WavStreamPlayer({ sampleRate: 24000 })
   );
-  const clientRef = useRef<RealtimeClient>(
-    new RealtimeClient(
-      LOCAL_RELAY_SERVER_URL
-        ? { url: `${LOCAL_RELAY_SERVER_URL}/ws` }  // Add '/ws' to the URL
-        : {
-            apiKey: apiKey,
-            dangerouslyAllowAPIKeyInBrowser: true,
-          }
-    )
-  );
+
+  const wsRef = useRef<ReconnectingWebSocket | null>(null);
 
   /**
    * References for
@@ -106,12 +70,8 @@ export function ConsolePage() {
 
   /**
    * All of our variables for displaying application state
-   * - items are all conversation items (dialog)
-   * - realtimeEvents are event logs, which can be expanded
-   * - memoryKv is for set_memory() function
-   * - coords, marker are for get_weather() function
    */
-  const [items, setItems] = useState<ItemType[]>([]);
+  const [items, setItems] = useState<any[]>([]);
   const [realtimeEvents, setRealtimeEvents] = useState<RealtimeEvent[]>([]);
   const [expandedEvents, setExpandedEvents] = useState<{
     [key: string]: boolean;
@@ -148,23 +108,9 @@ export function ConsolePage() {
   }, []);
 
   /**
-   * When you click the API key
-   */
-  const resetAPIKey = useCallback(() => {
-    const apiKey = prompt('OpenAI API Key');
-    if (apiKey !== null) {
-      localStorage.clear();
-      localStorage.setItem('tmp::voice_api_key', apiKey);
-      window.location.reload();
-    }
-  }, []);
-
-  /**
-   * Connect to conversation:
-   * WavRecorder taks speech input, WavStreamPlayer output, client is API client
+   * Connect to relay server
    */
   const connectConversation = useCallback(async () => {
-    const client = clientRef.current;
     const wavRecorder = wavRecorderRef.current;
     const wavStreamPlayer = wavStreamPlayerRef.current;
 
@@ -172,7 +118,6 @@ export function ConsolePage() {
     startTimeRef.current = new Date().toISOString();
     setIsConnected(true);
     setRealtimeEvents([]);
-    setItems(client.conversation.getItems());
 
     // Connect to microphone
     await wavRecorder.begin();
@@ -180,19 +125,59 @@ export function ConsolePage() {
     // Connect to audio output
     await wavStreamPlayer.connect();
 
-    // Connect to realtime API
-    await client.connect();
-    client.sendUserMessageContent([
-      {
-        type: `input_text`,
-        text: `Hello!`,
-        // text: `For testing purposes, I want you to list ten car brands. Number each item, e.g. "one (or whatever number you are one): the item name".`
-      },
-    ]);
+    // Connect to relay server
+    const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
+    const ws = new ReconnectingWebSocket(wsUrl);
+    wsRef.current = ws;
 
-    if (client.getTurnDetectionType() === 'server_vad') {
-      await wavRecorder.record((data) => client.appendInputAudio(data.mono));
-    }
+    ws.onopen = () => {
+      console.log('Connected to relay server');
+    };
+
+    ws.onmessage = async (event) => {
+      const data = JSON.parse(event.data);
+      // Handle events from relay server
+      const realtimeEvent = {
+        time: data.timestamp || new Date().toISOString(),
+        source: 'server' as const,
+        event: data,
+      };
+      setRealtimeEvents((prev) => [...prev, realtimeEvent]);
+
+      // Handle conversation items
+      if (data.item) {
+        setItems((prevItems) => {
+          const existingItemIndex = prevItems.findIndex((item) => item.id === data.item.id);
+          if (existingItemIndex !== -1) {
+            const updatedItems = [...prevItems];
+            updatedItems[existingItemIndex] = data.item;
+            return updatedItems;
+          } else {
+            return [...prevItems, data.item];
+          }
+        });
+      }
+
+      // Handle audio playback
+      if (data.delta?.audio) {
+        wavStreamPlayer.add16BitPCM(data.delta.audio, data.item.id);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('Disconnected from relay server');
+      setIsConnected(false);
+    };
+
+    // Send initial message to OpenAI via relay server
+    const initialMessage = {
+      type: 'conversation.item.create',
+      item: {
+        type: 'user_message',
+        text: 'Hello!',
+      },
+    };
+    ws.send(JSON.stringify(initialMessage));
   }, []);
 
   /**
@@ -209,65 +194,63 @@ export function ConsolePage() {
     });
     setMarker(null);
 
-    const client = clientRef.current;
-    client.disconnect();
-
     const wavRecorder = wavRecorderRef.current;
     await wavRecorder.end();
 
     const wavStreamPlayer = wavStreamPlayerRef.current;
     await wavStreamPlayer.interrupt();
-  }, []);
 
-  const deleteConversationItem = useCallback(async (id: string) => {
-    const client = clientRef.current;
-    client.deleteItem(id);
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
   }, []);
 
   /**
-   * In push-to-talk mode, start recording
-   * .appendInputAudio() for each sample
+   * Start and stop recording
    */
   const startRecording = async () => {
     setIsRecording(true);
-    const client = clientRef.current;
     const wavRecorder = wavRecorderRef.current;
-    const wavStreamPlayer = wavStreamPlayerRef.current;
-    const trackSampleOffset = await wavStreamPlayer.interrupt();
-    if (trackSampleOffset?.trackId) {
-      const { trackId, offset } = trackSampleOffset;
-      await client.cancelResponse(trackId, offset);
-    }
-    await wavRecorder.record((data) => client.appendInputAudio(data.mono));
+    await wavRecorder.record((data) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const audioEvent = {
+          type: 'input_audio',
+          audio: data.mono,
+        };
+        wsRef.current.send(JSON.stringify(audioEvent));
+      }
+    });
   };
 
-  /**
-   * In push-to-talk mode, stop recording
-   */
   const stopRecording = async () => {
     setIsRecording(false);
-    const client = clientRef.current;
     const wavRecorder = wavRecorderRef.current;
     await wavRecorder.pause();
-    client.createResponse();
+    // Send turn-end event
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      const turnEndEvent = {
+        type: 'input_audio.end',
+      };
+      wsRef.current.send(JSON.stringify(turnEndEvent));
+    }
   };
 
   /**
    * Switch between Manual <> VAD mode for communication
    */
   const changeTurnEndType = async (value: string) => {
-    const client = clientRef.current;
-    const wavRecorder = wavRecorderRef.current;
-    if (value === 'none' && wavRecorder.getStatus() === 'recording') {
-      await wavRecorder.pause();
-    }
-    client.updateSession({
-      turn_detection: value === 'none' ? null : { type: 'server_vad' },
-    });
-    if (value === 'server_vad' && client.isConnected()) {
-      await wavRecorder.record((data) => client.appendInputAudio(data.mono));
-    }
     setCanPushToTalk(value === 'none');
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Send session update to relay server
+      const sessionUpdate = {
+        type: 'session.update',
+        session: {
+          turn_detection: value === 'none' ? null : { type: 'server_vad' },
+        },
+      };
+      wsRef.current.send(JSON.stringify(sessionUpdate));
+    }
   };
 
   /**
@@ -369,140 +352,6 @@ export function ConsolePage() {
   }, []);
 
   /**
-   * Core RealtimeClient and audio capture setup
-   * Set all of our instructions, tools, events and more
-   */
-  useEffect(() => {
-    // Get refs
-    const wavStreamPlayer = wavStreamPlayerRef.current;
-    const client = clientRef.current;
-
-    // Set instructions
-    client.updateSession({ instructions: instructions });
-    // Set transcription, otherwise we don't get user transcriptions back
-    client.updateSession({ input_audio_transcription: { model: 'whisper-1' } });
-
-    // Add function tools from functionSchemas
-    functionSchemas.forEach((tool) => {
-      client.addTool(tool, async (args: { [key: string]: any }) => {
-        // Implement function handler
-        const functionName = tool.name;
-        switch (functionName) {
-          case 'add_pickmove_task':
-            console.log('Executing add_pickmove_task with args:', args);
-            // Simulate processing
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'PickMove task added successfully.' };
-          case 'add_pour_task':
-            console.log('Executing add_pour_task with args:', args);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'Pour task added successfully.' };
-          case 'add_return_task':
-            console.log('Executing add_return_task with args:', args);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'Return task added successfully.' };
-          default:
-            return { error: `Unknown function: ${functionName}` };
-        }
-      });
-    });
-
-    // handle realtime events from client + server for event logging
-    client.on('realtime.event', (realtimeEvent: RealtimeEvent) => {
-      setRealtimeEvents((realtimeEvents) => {
-        const lastEvent = realtimeEvents[realtimeEvents.length - 1];
-        if (lastEvent?.event.type === realtimeEvent.event.type) {
-          // if we receive multiple events in a row, aggregate them for display purposes
-          lastEvent.count = (lastEvent.count || 0) + 1;
-          return realtimeEvents.slice(0, -1).concat(lastEvent);
-        } else {
-          return realtimeEvents.concat(realtimeEvent);
-        }
-      });
-    });
-    client.on('error', (event: any) => console.error(event));
-    client.on('conversation.interrupted', async () => {
-      const trackSampleOffset = await wavStreamPlayer.interrupt();
-      if (trackSampleOffset?.trackId) {
-        const { trackId, offset } = trackSampleOffset;
-        await client.cancelResponse(trackId, offset);
-      }
-    });
-    client.on('conversation.updated', async ({ item, delta }: any) => {
-      const items = client.conversation.getItems();
-
-      if (item.type === 'function_call' && item.status === 'completed') {
-        const functionName = item.name;
-        const functionArguments = JSON.parse(item.arguments);
-
-        console.log(`Assistant called function: ${functionName}`);
-        console.log('With arguments:', functionArguments);
-
-        // Handle the function call
-        let functionResult;
-        try {
-          functionResult = await handleFunctionCall(functionName, functionArguments);
-        } catch (error: any) {
-          functionResult = { error: error.message };
-        }
-
-        // Send the function result back to the assistant
-        client.realtime.send('conversation.item.create', {
-          item: {
-            type: 'function_call_output',
-            call_id: item.id,
-            output: JSON.stringify(functionResult),
-          },
-        });
-
-        // Trigger the assistant to generate the next response
-        client.realtime.send('response.create', {});
-      }
-
-      if (delta?.audio) {
-        wavStreamPlayer.add16BitPCM(delta.audio, item.id);
-      }
-      if (item.status === 'completed' && item.formatted.audio?.length) {
-        const wavFile = await WavRecorder.decode(
-          item.formatted.audio,
-          24000,
-          24000
-        );
-        item.formatted.file = wavFile;
-      }
-      setItems(items);
-    });
-
-    setItems(client.conversation.getItems());
-
-    return () => {
-      // cleanup; resets to defaults
-      client.reset();
-    };
-  }, []);
-
-  // Implement your function logic here
-  async function handleFunctionCall(functionName: string, functionArguments: { [key: string]: any }) {
-    switch (functionName) {
-      case 'add_pickmove_task':
-        console.log('Executing add_pickmove_task with args:', functionArguments);
-        // Simulate processing
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        return { message: 'PickMove task added successfully.' };
-      case 'add_pour_task':
-        console.log('Executing add_pour_task with args:', functionArguments);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        return { message: 'Pour task added successfully.' };
-      case 'add_return_task':
-        console.log('Executing add_return_task with args:', functionArguments);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        return { message: 'Return task added successfully.' };
-      default:
-        return { error: `Unknown function: ${functionName}` };
-    }
-  }
-
-  /**
    * Render the application
    */
   return (
@@ -511,17 +360,6 @@ export function ConsolePage() {
         <div className="content-title">
           <img src="/openai-logomark.svg" />
           <span>realtime console</span>
-        </div>
-        <div className="content-api-key">
-          {!LOCAL_RELAY_SERVER_URL && (
-            <Button
-              icon={Edit}
-              iconPosition="end"
-              buttonStyle="flush"
-              label={`api key: ${apiKey.slice(0, 3)}...`}
-              onClick={() => resetAPIKey()}
-            />
-          )}
         </div>
       </div>
       <div className="content-main">
@@ -547,7 +385,7 @@ export function ConsolePage() {
                   event.delta = `[trimmed: ${event.delta.length} bytes]`;
                 }
                 return (
-                  <div className="event" key={event.event_id}>
+                  <div className="event" key={i}>
                     <div className="event-timestamp">
                       {formatTime(realtimeEvent.time)}
                     </div>
@@ -556,7 +394,7 @@ export function ConsolePage() {
                         className="event-summary"
                         onClick={() => {
                           // toggle event details
-                          const id = event.event_id;
+                          const id = i.toString();
                           const expanded = { ...expandedEvents };
                           if (expanded[id]) {
                             delete expanded[id];
@@ -589,7 +427,7 @@ export function ConsolePage() {
                           {count && ` (${count})`}
                         </div>
                       </div>
-                      {!!expandedEvents[event.event_id] && (
+                      {!!expandedEvents[i.toString()] && (
                         <div className="event-payload">
                           {JSON.stringify(event, null, 2)}
                         </div>
@@ -613,48 +451,23 @@ export function ConsolePage() {
                           conversationItem.role || conversationItem.type
                         ).replaceAll('_', ' ')}
                       </div>
-                      <div
-                        className="close"
-                        onClick={() =>
-                          deleteConversationItem(conversationItem.id)
-                        }
-                      >
-                        <X />
-                      </div>
                     </div>
                     <div className={`speaker-content`}>
-                      {/* tool response */}
-                      {conversationItem.type === 'function_call_output' && (
-                        <div>{conversationItem.formatted.output}</div>
+                      {conversationItem.text && (
+                        <div>{conversationItem.text}</div>
                       )}
-                      {/* tool call */}
-                      {!!conversationItem.formatted.tool && (
+                      {conversationItem.output && (
+                        <div>{conversationItem.output}</div>
+                      )}
+                      {conversationItem.arguments && (
                         <div>
-                          {conversationItem.formatted.tool.name}(
-                          {conversationItem.formatted.tool.arguments})
+                          {conversationItem.name}(
+                          {conversationItem.arguments})
                         </div>
                       )}
-                      {!conversationItem.formatted.tool &&
-                        conversationItem.role === 'user' && (
-                          <div>
-                            {conversationItem.formatted.transcript ||
-                              (conversationItem.formatted.audio?.length
-                                ? '(awaiting transcript)'
-                                : conversationItem.formatted.text ||
-                                  '(item sent)')}
-                          </div>
-                        )}
-                      {!conversationItem.formatted.tool &&
-                        conversationItem.role === 'assistant' && (
-                          <div>
-                            {conversationItem.formatted.transcript ||
-                              conversationItem.formatted.text ||
-                              '(truncated)'}
-                          </div>
-                        )}
-                      {conversationItem.formatted.file && (
+                      {conversationItem.audio && (
                         <audio
-                          src={conversationItem.formatted.file.url}
+                          src={`data:audio/wav;base64,${conversationItem.audio}`}
                           controls
                         />
                       )}
