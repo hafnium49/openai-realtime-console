@@ -84,7 +84,7 @@ export function ConsolePage() {
   const clientRef = useRef<RealtimeClient>(
     new RealtimeClient(
       LOCAL_RELAY_SERVER_URL
-        ? { url: LOCAL_RELAY_SERVER_URL }
+        ? { url: `${LOCAL_RELAY_SERVER_URL}/ws` }  // Add '/ws' to the URL
         : {
             apiKey: apiKey,
             dangerouslyAllowAPIKeyInBrowser: true,
