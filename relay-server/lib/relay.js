@@ -176,9 +176,15 @@ export class RealtimeRelay {
       if (this.client.isConnected()) {
         this.client.realtime.send('conversation.item.create', {
           item: {
-            type: 'user_message',
-            text: msg,
-          },
+            type: 'message',
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: msg
+              }
+            ]
+          }
         });
       } else {
         this.chemistry3dMessageQueue.push(msg);
@@ -192,9 +198,15 @@ export class RealtimeRelay {
         const msg = this.chemistry3dMessageQueue.shift();
         this.client.realtime.send('conversation.item.create', {
           item: {
-            type: 'user_message',
-            text: msg,
-          },
+            type: 'message',
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: msg
+              }
+            ]
+          }
         });
       }
     };
