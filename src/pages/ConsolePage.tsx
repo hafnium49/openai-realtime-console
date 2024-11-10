@@ -214,9 +214,15 @@ export function ConsolePage() {
     const wavRecorder = wavRecorderRef.current;
     await wavRecorder.record((data) => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        // Convert audio data to Base64
+        const audioBuffer = data.mono.buffer;
+        const uint8Array = new Uint8Array(audioBuffer);
+        const binaryString = String.fromCharCode(...uint8Array);
+        const base64Audio = btoa(binaryString);
+
         const audioEvent = {
-          type: 'input_audio',
-          audio: data.mono,
+          type: 'input_audio_buffer.append',
+          audio: base64Audio,
         };
         wsRef.current.send(JSON.stringify(audioEvent));
       }
@@ -227,12 +233,13 @@ export function ConsolePage() {
     setIsRecording(false);
     const wavRecorder = wavRecorderRef.current;
     await wavRecorder.pause();
-    // Send turn-end event
+
+    // Send commit event to process the audio buffer
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const turnEndEvent = {
-        type: 'input_audio.end',
+      const commitEvent = {
+        type: 'input_audio_buffer.commit'
       };
-      wsRef.current.send(JSON.stringify(turnEndEvent));
+      wsRef.current.send(JSON.stringify(commitEvent));
     }
   };
 
@@ -242,12 +249,13 @@ export function ConsolePage() {
   const changeTurnEndType = async (value: string) => {
     setCanPushToTalk(value === 'none');
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      // Send session update to relay server
+      // Update session with turn detection settings
       const sessionUpdate = {
         type: 'session.update',
         session: {
           turn_detection: value === 'none' ? null : { type: 'server_vad' },
-        },
+          input_audio_format: { type: 'pcm16', sampling_rate: 24000 } // Add explicit audio format
+        }
       };
       wsRef.current.send(JSON.stringify(sessionUpdate));
     }
