@@ -120,7 +120,11 @@ export function ConsolePage() {
     setRealtimeEvents([]);
 
     // Connect to microphone
-    await wavRecorder.begin();
+    try {
+      await wavRecorder.begin();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+    }
 
     // Connect to audio output
     await wavStreamPlayer.connect();
@@ -147,7 +151,9 @@ export function ConsolePage() {
       // Handle conversation items
       if (data.item) {
         setItems((prevItems) => {
-          const existingItemIndex = prevItems.findIndex((item) => item.id === data.item.id);
+          const existingItemIndex = prevItems.findIndex(
+            (item) => item.id === data.item.id
+          );
           if (existingItemIndex !== -1) {
             const updatedItems = [...prevItems];
             updatedItems[existingItemIndex] = data.item;
@@ -177,7 +183,9 @@ export function ConsolePage() {
         text: 'Hello!',
       },
     };
-    ws.send(JSON.stringify(initialMessage));
+    ws.onopen = () => {
+      ws.send(JSON.stringify(initialMessage));
+    };
   }, []);
 
   /**
@@ -207,37 +215,55 @@ export function ConsolePage() {
   }, []);
 
   /**
+   * Utility function to convert ArrayBuffer to Base64
+   */
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    // Use a Blob and FileReader for large buffers
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  };
+
+  /**
    * Start and stop recording
    */
   const startRecording = async () => {
     setIsRecording(true);
     const wavRecorder = wavRecorderRef.current;
-    await wavRecorder.record((data) => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        // Convert audio data to Base64
-        const audioBuffer = data.mono.buffer;
-        const uint8Array = new Uint8Array(audioBuffer);
-        const binaryString = String.fromCharCode(...uint8Array);
-        const base64Audio = btoa(binaryString);
-
-        const audioEvent = {
-          type: 'input_audio_buffer.append',
-          audio: base64Audio,
-        };
-        wsRef.current.send(JSON.stringify(audioEvent));
-      }
-    });
+    try {
+      wavRecorder.record((data) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const audioBuffer = data.mono.buffer;
+          console.log('Audio buffer length:', audioBuffer.byteLength);
+          if (audioBuffer.byteLength > 0) {
+            const base64Audio = arrayBufferToBase64(audioBuffer);
+            const audioEvent = {
+              type: 'input_audio_buffer.append',
+              audio: base64Audio,
+            };
+            wsRef.current.send(JSON.stringify(audioEvent));
+          } else {
+            console.warn('Received empty audio buffer');
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error starting recording:', error);
+    }
   };
 
-  const stopRecording = async () => {
+  const stopRecording = () => {
     setIsRecording(false);
     const wavRecorder = wavRecorderRef.current;
-    await wavRecorder.pause();
-
+    wavRecorder.pause();
     // Send commit event to process the audio buffer
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const commitEvent = {
-        type: 'input_audio_buffer.commit'
+        type: 'input_audio_buffer.commit',
       };
       wsRef.current.send(JSON.stringify(commitEvent));
     }
@@ -246,7 +272,7 @@ export function ConsolePage() {
   /**
    * Switch between Manual <> VAD mode for communication
    */
-  const changeTurnEndType = async (value: string) => {
+  const changeTurnEndType = (value: string) => {
     setCanPushToTalk(value === 'none');
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       // Update session with turn detection settings
@@ -254,8 +280,8 @@ export function ConsolePage() {
         type: 'session.update',
         session: {
           turn_detection: value === 'none' ? null : { type: 'server_vad' },
-          input_audio_format: { type: 'pcm16', sampling_rate: 24000 } // Add explicit audio format
-        }
+          input_audio_format: 'pcm16', // Ensure input_audio_format is correctly set
+        },
       };
       wsRef.current.send(JSON.stringify(sessionUpdate));
     }
@@ -414,9 +440,7 @@ export function ConsolePage() {
                       >
                         <div
                           className={`event-source ${
-                            event.type === 'error'
-                              ? 'error'
-                              : realtimeEvent.source
+                            event.type === 'error' ? 'error' : realtimeEvent.source
                           }`}
                         >
                           {realtimeEvent.source === 'client' ? (
@@ -455,22 +479,20 @@ export function ConsolePage() {
                   <div className="conversation-item" key={conversationItem.id}>
                     <div className={`speaker ${conversationItem.role || ''}`}>
                       <div>
-                        {(
-                          conversationItem.role || conversationItem.type
-                        ).replaceAll('_', ' ')}
+                        {(conversationItem.role || conversationItem.type).replaceAll(
+                          '_',
+                          ' '
+                        )}
                       </div>
                     </div>
                     <div className={`speaker-content`}>
-                      {conversationItem.text && (
-                        <div>{conversationItem.text}</div>
-                      )}
+                      {conversationItem.text && <div>{conversationItem.text}</div>}
                       {conversationItem.output && (
                         <div>{conversationItem.output}</div>
                       )}
                       {conversationItem.arguments && (
                         <div>
-                          {conversationItem.name}(
-                          {conversationItem.arguments})
+                          {conversationItem.name}({conversationItem.arguments})
                         </div>
                       )}
                       {conversationItem.audio && (
