@@ -119,13 +119,6 @@ export function ConsolePage() {
     setIsConnected(true);
     setRealtimeEvents([]);
 
-    // Connect to microphone
-    try {
-      await wavRecorder.begin();
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-    }
-
     // Connect to audio output
     await wavStreamPlayer.connect();
 
@@ -235,7 +228,13 @@ export function ConsolePage() {
     setIsRecording(true);
     const wavRecorder = wavRecorderRef.current;
     try {
+      // Initialize the microphone here
+      await wavRecorder.begin();
       wavRecorder.record((data) => {
+        if (!data || !data.mono || !data.mono.buffer) {
+          console.error('Received undefined or invalid data from the recorder');
+          return;
+        }
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           const audioBuffer = data.mono.buffer;
           console.log('Audio buffer length:', audioBuffer.byteLength);
@@ -253,19 +252,24 @@ export function ConsolePage() {
       });
     } catch (error) {
       console.error('Error starting recording:', error);
+      setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
     setIsRecording(false);
     const wavRecorder = wavRecorderRef.current;
-    wavRecorder.pause();
-    // Send commit event to process the audio buffer
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const commitEvent = {
-        type: 'input_audio_buffer.commit',
-      };
-      wsRef.current.send(JSON.stringify(commitEvent));
+    if (wavRecorder.recording) {
+      wavRecorder.pause();
+      // Send commit event to process the audio buffer
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const commitEvent = {
+          type: 'input_audio_buffer.commit',
+        };
+        wsRef.current.send(JSON.stringify(commitEvent));
+      }
+    } else {
+      console.warn('Recording was not started');
     }
   };
 
