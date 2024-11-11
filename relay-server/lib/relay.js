@@ -68,8 +68,23 @@ export class RealtimeRelay {
       try {
         const event = JSON.parse(data);
         this.log(`Received event from React UI: ${event.type}`);
-        // Send event to OpenAI Realtime API
-        this.client.realtime.send(event.type, event);
+
+        if (event.type === 'conversation.item.create') {
+          // Send message to OpenAI
+          this.client.sendUserMessageContent([{ type: 'text', text: event.item.text }]);
+        } else if (event.type === 'audio_chunk') {
+          // Receive audio data and send to OpenAI
+          const audioData = new Int16Array(event.data);
+          this.client.appendInputAudio(audioData);
+        } else if (event.type === 'audio_commit') {
+          // Commit audio buffer and create a response
+          this.client.createResponse();
+        } else if (event.type === 'session.update') {
+          // Update session parameters
+          this.client.updateSession(event.session);
+        } else {
+          this.log(`Unhandled event type: ${event.type}`);
+        }
       } catch (e) {
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
@@ -91,10 +106,11 @@ export class RealtimeRelay {
     this.client = new RealtimeClient({ apiKey: this.apiKey });
 
     // Set instructions and other session configurations
-    this.client.updateSession({ instructions: instructions });
-
-    // Set transcription model
-    this.client.updateSession({ input_audio_transcription: { model: 'whisper-1' } });
+    this.client.updateSession({
+      instructions: instructions,
+      input_audio_transcription: { model: 'whisper-1' },
+      input_audio_format: 'pcm16', // Added 'input_audio_format' here
+    });
 
     // Add function tools from functionSchemas
     functionSchemas.forEach((tool) => {
@@ -122,20 +138,40 @@ export class RealtimeRelay {
     });
 
     // Relay OpenAI events to React UI and Chemistry3D
-    this.client.realtime.on('server.*', (event) => {
-      this.log(`Relaying "${event.type}" to clients`);
-      // Send event to all connected WebSocket clients (React UI)
+    this.client.on('conversation.updated', ({ item, delta }) => {
+      const event = {
+        type: 'conversation.item.update',
+        item,
+        delta,
+      };
+      for (const clientWs of this.connectedClients) {
+        clientWs.send(JSON.stringify(event));
+      }
+    });
+
+    this.client.on('conversation.created', ({ item }) => {
+      const event = {
+        type: 'conversation.item.create',
+        item,
+      };
       for (const clientWs of this.connectedClients) {
         clientWs.send(JSON.stringify(event));
       }
       // Forward function calls to Chemistry3D
-      if (
-        event.type === 'conversation.item.create' &&
-        event.item.type === 'function_call'
-      ) {
-        this.io.emit('function_call', event.item);
+      if (item.type === 'function_call') {
+        this.io.emit('function_call', item);
       }
-      this.logEvent('openai', event.type, event);
+    });
+
+    this.client.on('error', (error) => {
+      this.log('OpenAI Realtime API error:', error);
+      const errorEvent = {
+        type: 'error',
+        error,
+      };
+      for (const clientWs of this.connectedClients) {
+        clientWs.send(JSON.stringify(errorEvent));
+      }
     });
 
     this.client.realtime.on('close', () => {
@@ -175,7 +211,8 @@ export class RealtimeRelay {
       // Send message to OpenAI
       this.client.realtime.send('conversation.item.create', {
         item: {
-          type: 'user_message',
+          type: 'message',
+          role: 'user', // Added 'role' here
           text: msg,
         },
       });
@@ -216,7 +253,8 @@ export class RealtimeRelay {
       const msg = this.chemistry3dMessageQueue.shift();
       this.client.realtime.send('conversation.item.create', {
         item: {
-          type: 'user_message',
+          type: 'message',
+          role: 'user', // Added 'role' here
           text: msg,
         },
       });

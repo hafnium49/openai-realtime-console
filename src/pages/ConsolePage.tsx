@@ -172,13 +172,21 @@ export function ConsolePage() {
     const initialMessage = {
       type: 'conversation.item.create',
       item: {
-        type: 'user_message',
+        type: 'message', // Changed from 'user_message' to 'message'
+        role: 'user', // Added 'role' here
         text: 'Hello!',
       },
     };
     ws.onopen = () => {
       ws.send(JSON.stringify(initialMessage));
     };
+
+    // Connect to microphone
+    try {
+      await wavRecorder.begin();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+    }
   }, []);
 
   /**
@@ -208,46 +216,24 @@ export function ConsolePage() {
   }, []);
 
   /**
-   * Utility function to convert ArrayBuffer to Base64
-   */
-  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
-    // Use a Blob and FileReader for large buffers
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  };
-
-  /**
    * Start and stop recording
    */
-  const startRecording = async () => {
+  const startRecording = () => {
     setIsRecording(true);
     const wavRecorder = wavRecorderRef.current;
     try {
-      // Initialize the microphone here
-      await wavRecorder.begin();
       wavRecorder.record((data) => {
         if (!data || !data.mono || !data.mono.buffer) {
           console.error('Received undefined or invalid data from the recorder');
           return;
         }
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          const audioBuffer = data.mono.buffer;
-          console.log('Audio buffer length:', audioBuffer.byteLength);
-          if (audioBuffer.byteLength > 0) {
-            const base64Audio = arrayBufferToBase64(audioBuffer);
-            const audioEvent = {
-              type: 'input_audio_buffer.append',
-              audio: base64Audio,
-            };
-            wsRef.current.send(JSON.stringify(audioEvent));
-          } else {
-            console.warn('Received empty audio buffer');
-          }
+          const audioData = new Int16Array(data.mono.buffer);
+          const audioEvent = {
+            type: 'audio_chunk',
+            data: Array.from(audioData), // Convert Int16Array to array
+          };
+          wsRef.current.send(JSON.stringify(audioEvent));
         }
       });
     } catch (error) {
@@ -261,10 +247,9 @@ export function ConsolePage() {
     const wavRecorder = wavRecorderRef.current;
     if (wavRecorder.recording) {
       wavRecorder.pause();
-      // Send commit event to process the audio buffer
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const commitEvent = {
-          type: 'input_audio_buffer.commit',
+          type: 'audio_commit',
         };
         wsRef.current.send(JSON.stringify(commitEvent));
       }
@@ -284,7 +269,6 @@ export function ConsolePage() {
         type: 'session.update',
         session: {
           turn_detection: value === 'none' ? null : { type: 'server_vad' },
-          input_audio_format: 'pcm16', // Ensure input_audio_format is correctly set
         },
       };
       wsRef.current.send(JSON.stringify(sessionUpdate));
