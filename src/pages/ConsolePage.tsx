@@ -40,6 +40,17 @@ interface RealtimeEvent {
   event: { [key: string]: any };
 }
 
+// Add helper function to decode Base64 to Int16Array
+function base64ToInt16Array(base64: string): Int16Array {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return new Int16Array(bytes.buffer);
+}
+
 export function ConsolePage() {
   /**
    * Instantiate:
@@ -157,9 +168,14 @@ export function ConsolePage() {
         });
       }
 
-      // Handle audio playback
+      // Handle audio playback with Base64 decoding
       if (data.delta?.audio) {
-        wavStreamPlayer.add16BitPCM(data.delta.audio, data.item.id);
+        try {
+          const audioData = base64ToInt16Array(data.delta.audio);
+          wavStreamPlayer.add16BitPCM(audioData, data.item.id);
+        } catch (error) {
+          console.error('Error processing audio data:', error);
+        }
       }
     };
 

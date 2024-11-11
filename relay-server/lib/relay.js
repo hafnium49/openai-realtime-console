@@ -139,6 +139,14 @@ export class RealtimeRelay {
 
     // Relay OpenAI events to React UI and Chemistry3D
     this.client.on('conversation.updated', ({ item, delta }) => {
+      // Serialize delta.audio if present
+      if (delta?.audio) {
+        // Convert Int16Array to Buffer
+        const audioBuffer = Buffer.from(delta.audio.buffer);
+        // Convert Buffer to Base64 string
+        delta.audio = audioBuffer.toString('base64');
+      }
+
       const event = {
         type: 'conversation.item.update',
         item,
