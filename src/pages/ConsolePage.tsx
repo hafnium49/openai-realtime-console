@@ -140,6 +140,7 @@ export function ConsolePage() {
     // Connect to relay server
     const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
     const ws = new ReconnectingWebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer'; // Set binary type for audio data
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -147,39 +148,44 @@ export function ConsolePage() {
     };
 
     ws.onmessage = async (event) => {
-      const data = JSON.parse(event.data);
-      // Handle events from relay server
-      const realtimeEvent = {
-        time: data.timestamp || new Date().toISOString(),
-        source: 'server' as const,
-        event: data,
-      };
-      setRealtimeEvents((prev) => [...prev, realtimeEvent]);
+      if (typeof event.data === 'string') {
+        const data = JSON.parse(event.data);
+        // Handle events from relay server
+        const realtimeEvent = {
+          time: data.timestamp || new Date().toISOString(),
+          source: 'server' as const,
+          event: data,
+        };
+        setRealtimeEvents((prev) => [...prev, realtimeEvent]);
 
-      // Handle conversation items
-      if (data.item) {
-        setItems((prevItems) => {
-          const existingItemIndex = prevItems.findIndex(
-            (item) => item.id === data.item.id
-          );
-          if (existingItemIndex !== -1) {
-            const updatedItems = [...prevItems];
-            updatedItems[existingItemIndex] = data.item;
-            return updatedItems;
-          } else {
-            return [...prevItems, data.item];
-          }
-        });
-      }
-
-      // Handle audio playback with Base64 decoding
-      if (data.delta?.audio) {
-        try {
-          const audioData = base64ToInt16Array(data.delta.audio);
-          wavStreamPlayer.add16BitPCM(audioData, data.item.id);
-        } catch (error) {
-          console.error('Error processing audio data:', error);
+        // Handle conversation items
+        if (data.item) {
+          setItems((prevItems) => {
+            const existingItemIndex = prevItems.findIndex(
+              (item) => item.id === data.item.id
+            );
+            if (existingItemIndex !== -1) {
+              const updatedItems = [...prevItems];
+              updatedItems[existingItemIndex] = data.item;
+              return updatedItems;
+            } else {
+              return [...prevItems, data.item];
+            }
+          });
         }
+
+        // Handle audio playback with Base64 decoding
+        if (data.delta?.audio) {
+          try {
+            const audioData = base64ToInt16Array(data.delta.audio);
+            wavStreamPlayer.add16BitPCM(audioData, data.item.id);
+          } catch (error) {
+            console.error('Error processing audio data:', error);
+          }
+        }
+      } else if (event.data instanceof ArrayBuffer) {
+        console.log('Received binary audio data from server');
+        // Handle binary audio data if needed
       }
     };
 
@@ -249,15 +255,20 @@ export function ConsolePage() {
           return;
         }
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          // Log the audio data
-          console.log('Sending audio data to relay server:', data.mono.buffer);
-          const audioData = new Int16Array(data.mono.buffer);
-          setAudioChunks((prevChunks) => [...prevChunks, audioData]);
-          const audioEvent = {
-            type: 'audio_chunk',
-            data: Array.from(audioData), // Convert Int16Array to array
+          // Send audio data as binary
+          wsRef.current.send(data.mono.buffer);
+          setAudioChunks((prevChunks) => [...prevChunks, new Int16Array(data.mono.buffer)]);
+
+          // Add realtime event for visualization
+          const realtimeEvent: RealtimeEvent = {
+            time: new Date().toISOString(),
+            source: 'client',
+            event: {
+              type: 'input_audio_buffer.append',
+              audio: `[audio chunk: ${data.mono.buffer.byteLength} bytes]`
+            }
           };
-          wsRef.current.send(JSON.stringify(audioEvent));
+          setRealtimeEvents(prev => [...prev, realtimeEvent]);
         }
       });
     } catch (error) {

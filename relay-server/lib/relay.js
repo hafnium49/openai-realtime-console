@@ -67,48 +67,67 @@ export class RealtimeRelay {
       await this.initializeOpenAIClient(ws);
     }
 
-    // Relay events from React UI to OpenAI Realtime API
-    ws.on('message', (data) => {
+    // Handle both binary and text messages
+    ws.on('message', (data, isBinary) => {
       try {
-        const event = JSON.parse(data);
-        this.log(`Received event from React UI: ${event.type}`);
-
-        if (event.type === 'conversation.item.create') {
-          // Send message to OpenAI
-          this.client.sendUserMessageContent([{ type: 'text', text: event.item.text }]);
-        } else if (event.type === 'audio_chunk') {
-          // Receive audio data and send to OpenAI
-          const audioData = new Int16Array(event.data);
-          // Log the audio data
-          console.log('Received audio data from frontend:', audioData);
-          // Store the audio chunks
+        if (isBinary) {
+          // Handle binary audio data
+          const audioData = new Int16Array(data.buffer);
+          this.log(`Received binary audio chunk: ${audioData.length} samples`);
+          
+          // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
           this.audioChunks.set(ws, chunks);
-          this.client.appendInputAudio(audioData);
-        } else if (event.type === 'audio_commit') {
-          // Reconstruct the audio data
-          const chunks = this.audioChunks.get(ws) || [];
-          const allAudioData = chunks.reduce((acc, chunk) => {
-            const newData = new Int16Array(acc.length + chunk.length);
-            newData.set(acc);
-            newData.set(chunk, acc.length);
-            return newData;
-          }, new Int16Array());
-          // Convert audio data to Base64
-          const audioBuffer = Buffer.from(allAudioData.buffer);
-          const audioBase64 = audioBuffer.toString('base64');
+
+          // Send to OpenAI
+          if (this.client) {
+            this.client.appendInputAudio(audioData);
+          }
+
           // Log the audio event
-          this.logEvent('client', 'audio_recording', { audioBase64 });
-          // Clear audio chunks
-          this.audioChunks.set(ws, []);
-          // Commit audio buffer and create a response
-          this.client.createResponse();
-        } else if (event.type === 'session.update') {
-          // Update session parameters
-          this.client.updateSession(event.session);
+          this.logEvent('client', 'audio_chunk', { 
+            size: audioData.length,
+            timestamp: new Date().toISOString()
+          });
         } else {
-          this.log(`Unhandled event type: ${event.type}`);
+          // Handle text messages (JSON)
+          const event = JSON.parse(data.toString());
+          this.log(`Received event from React UI: ${event.type}`);
+
+          if (event.type === 'audio_commit') {
+            // Create audio log from accumulated chunks
+            const chunks = this.audioChunks.get(ws) || [];
+            if (chunks.length > 0) {
+              const allAudioData = chunks.reduce((acc, chunk) => {
+                const newData = new Int16Array(acc.length + chunk.length);
+                newData.set(acc);
+                newData.set(chunk, acc.length);
+                return newData;
+              }, new Int16Array());
+
+              // Convert to Base64 for logging
+              const audioBuffer = Buffer.from(allAudioData.buffer);
+              const audioBase64 = audioBuffer.toString('base64');
+              this.logEvent('client', 'audio_recording', { audioBase64 });
+              
+              // Clear chunks
+              this.audioChunks.set(ws, []);
+            }
+
+            // Create response
+            if (this.client) {
+              this.client.createResponse();
+            }
+          } else if (event.type === 'conversation.item.create') {
+            // Send message to OpenAI
+            this.client.sendUserMessageContent([{ type: 'text', text: event.item.text }]);
+          } else if (event.type === 'session.update') {
+            // Update session parameters
+            this.client.updateSession(event.session);
+          } else {
+            this.log(`Unhandled event type: ${event.type}`);
+          }
         }
       } catch (e) {
         console.error(e.message);
