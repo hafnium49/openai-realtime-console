@@ -9,7 +9,6 @@ import express from 'express';
 import { instructions } from '../utils/conversation_config.js';
 import { functionSchemas } from '../utils/schemas.js';
 
-
 export class RealtimeRelay {
   constructor(apiKey) {
     this.apiKey = apiKey;
@@ -109,7 +108,7 @@ export class RealtimeRelay {
     this.client.updateSession({
       instructions: instructions,
       input_audio_transcription: { model: 'whisper-1' },
-      input_audio_format: 'pcm16', // Added 'input_audio_format' here
+      input_audio_format: 'pcm16', // Ensure audio format is set correctly
     });
 
     // Add function tools from functionSchemas
@@ -217,13 +216,7 @@ export class RealtimeRelay {
       }
 
       // Send message to OpenAI
-      this.client.realtime.send('conversation.item.create', {
-        item: {
-          type: 'message',
-          role: 'user', // Added 'role' here
-          text: msg,
-        },
-      });
+      this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
     });
 
     // Handle function call outputs from Chemistry3D
@@ -259,13 +252,7 @@ export class RealtimeRelay {
   processQueuedMessages() {
     while (this.chemistry3dMessageQueue.length > 0 && this.client?.isConnected()) {
       const msg = this.chemistry3dMessageQueue.shift();
-      this.client.realtime.send('conversation.item.create', {
-        item: {
-          type: 'message',
-          role: 'user', // Added 'role' here
-          text: msg,
-        },
-      });
+      this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
     }
   }
 
