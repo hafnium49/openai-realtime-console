@@ -97,6 +97,10 @@ export function ConsolePage() {
   });
   const [marker, setMarker] = useState<Coordinates | null>(null);
 
+  // Add state to store audio chunks and blobs
+  const [audioChunks, setAudioChunks] = useState<Int16Array[]>([]);
+  const [audioBlobs, setAudioBlobs] = useState<{ [key: string]: Blob }>({});
+
   /**
    * Utility for formatting the timing of logs
    */
@@ -236,6 +240,7 @@ export function ConsolePage() {
    */
   const startRecording = () => {
     setIsRecording(true);
+    setAudioChunks([]); // Reset audio chunks
     const wavRecorder = wavRecorderRef.current;
     try {
       wavRecorder.record((data) => {
@@ -244,7 +249,10 @@ export function ConsolePage() {
           return;
         }
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          // Log the audio data
+          console.log('Sending audio data to relay server:', data.mono.buffer);
           const audioData = new Int16Array(data.mono.buffer);
+          setAudioChunks((prevChunks) => [...prevChunks, audioData]);
           const audioEvent = {
             type: 'audio_chunk',
             data: Array.from(audioData), // Convert Int16Array to array
@@ -268,6 +276,38 @@ export function ConsolePage() {
           type: 'audio_commit',
         };
         wsRef.current.send(JSON.stringify(commitEvent));
+
+        // Reconstruct audio blob and store it
+        const allAudioData = audioChunks.reduce((acc, chunk) => {
+          const newData = new Int16Array(acc.length + chunk.length);
+          newData.set(acc);
+          newData.set(chunk, acc.length);
+          return newData;
+        }, new Int16Array());
+        const audioBuffer = new ArrayBuffer(allAudioData.length * 2);
+        const view = new DataView(audioBuffer);
+        for (let i = 0; i < allAudioData.length; i++) {
+          view.setInt16(i * 2, allAudioData[i], true);
+        }
+        const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
+
+        // Store the blob with a unique key
+        const timestamp = Date.now().toString();
+        setAudioBlobs((prevBlobs) => ({ ...prevBlobs, [timestamp]: audioBlob }));
+
+        // Add an event to realtimeEvents
+        const realtimeEvent: RealtimeEvent = {
+          time: new Date().toISOString(),
+          source: 'client',
+          event: {
+            type: 'audio_recording',
+            audioBlobKey: timestamp,
+          },
+        };
+        setRealtimeEvents((prev) => [...prev, realtimeEvent]);
+
+        // Clear audio chunks
+        setAudioChunks([]);
       }
     } else {
       console.warn('Recording was not started');
@@ -465,7 +505,17 @@ export function ConsolePage() {
                       </div>
                       {!!expandedEvents[i.toString()] && (
                         <div className="event-payload">
-                          {JSON.stringify(event, null, 2)}
+                          {event.type === 'audio_recording' &&
+                          audioBlobs[event.audioBlobKey] ? (
+                            <audio
+                              controls
+                              src={URL.createObjectURL(
+                                audioBlobs[event.audioBlobKey]
+                              )}
+                            />
+                          ) : (
+                            <div>{JSON.stringify(event, null, 2)}</div>
+                          )}
                         </div>
                       )}
                     </div>

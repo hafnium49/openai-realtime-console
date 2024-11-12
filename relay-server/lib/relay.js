@@ -19,6 +19,8 @@ export class RealtimeRelay {
     this.app = express();
     this.chemistry3dMessageQueue = []; // Message queue for Chemistry3D
     this.chemistry3dConnected = false; // Track if Chemistry3D is connected
+    this.audioChunks = new Map(); // Store audio chunks per client
+    this.logs = []; // Store logs for index.pug
   }
 
   listen(port) {
@@ -57,6 +59,9 @@ export class RealtimeRelay {
     // Add the WebSocket connection to the set
     this.connectedClients.add(ws);
 
+    // Initialize audioChunks for this ws
+    this.audioChunks.set(ws, []);
+
     // Instantiate the client if not already connected
     if (!this.client) {
       await this.initializeOpenAIClient(ws);
@@ -74,8 +79,29 @@ export class RealtimeRelay {
         } else if (event.type === 'audio_chunk') {
           // Receive audio data and send to OpenAI
           const audioData = new Int16Array(event.data);
+          // Log the audio data
+          console.log('Received audio data from frontend:', audioData);
+          // Store the audio chunks
+          const chunks = this.audioChunks.get(ws) || [];
+          chunks.push(audioData);
+          this.audioChunks.set(ws, chunks);
           this.client.appendInputAudio(audioData);
         } else if (event.type === 'audio_commit') {
+          // Reconstruct the audio data
+          const chunks = this.audioChunks.get(ws) || [];
+          const allAudioData = chunks.reduce((acc, chunk) => {
+            const newData = new Int16Array(acc.length + chunk.length);
+            newData.set(acc);
+            newData.set(chunk, acc.length);
+            return newData;
+          }, new Int16Array());
+          // Convert audio data to Base64
+          const audioBuffer = Buffer.from(allAudioData.buffer);
+          const audioBase64 = audioBuffer.toString('base64');
+          // Log the audio event
+          this.logEvent('client', 'audio_recording', { audioBase64 });
+          // Clear audio chunks
+          this.audioChunks.set(ws, []);
           // Commit audio buffer and create a response
           this.client.createResponse();
         } else if (event.type === 'session.update') {
@@ -91,6 +117,7 @@ export class RealtimeRelay {
     });
 
     ws.on('close', () => {
+      this.audioChunks.delete(ws);
       this.connectedClients.delete(ws);
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
@@ -279,6 +306,13 @@ export class RealtimeRelay {
 
   logEvent(source, type, data) {
     this.io.emit('log', {
+      source,
+      type,
+      data,
+      timestamp: new Date().toISOString(),
+    });
+    // Store logs for index.pug
+    this.logs.push({
       source,
       type,
       data,

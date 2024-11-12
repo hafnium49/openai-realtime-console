@@ -77,11 +77,22 @@ html(lang="en")
       socket.on('log', (log) => {
         const entry = document.createElement('div');
         entry.className = 'log-entry';
-        entry.innerHTML = `
+        let dataContent = JSON.stringify(log.data);
+
+        // If log type is 'audio_recording', create an audio element
+        if (log.type === 'audio_recording' && log.data.audioBase64) {
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.src = 'data:audio/wav;base64,' + log.data.audioBase64;
+          dataContent = '';
+          entry.appendChild(audio);
+        }
+
+        entry.innerHTML += `
           <span class="timestamp">[${new Date(log.timestamp).toLocaleTimeString()}]</span>
           <span class="source ${log.source}">[${log.source}]</span>
           <span class="type">${log.type}</span>
-          <span class="data">${JSON.stringify(log.data)}</span>
+          <span class="data">${dataContent}</span>
         `;
         logContent.appendChild(entry);
         logContent.scrollTop = logContent.scrollHeight;
