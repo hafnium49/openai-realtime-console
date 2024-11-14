@@ -347,37 +347,46 @@ export function ConsolePage() {
     setIsRecording(false);
     const wavRecorder = wavRecorderRef.current;
     if (wavRecorder.getStatus() === 'recording') {
-      await wavRecorder.pause();
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const commitEvent = {
-          type: 'audio_commit',
-        };
-        wsRef.current.send(JSON.stringify(commitEvent));
+      try {
+        await wavRecorder.pause();
+        
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          // Send audio commit event
+          const commitEvent = {
+            type: 'audio_commit',
+          };
+          wsRef.current.send(JSON.stringify(commitEvent));
 
-        // Use wavRecorder.save() to get the recorded audio
-        const result = await wavRecorder.save();
-        const audioBlob = result.blob;
+          // Save current recording
+          const result = await wavRecorder.save();
+          const audioBlob = result.blob;
 
-        // Store the blob with a unique key
-        const timestamp = Date.now().toString();
-        setAudioBlobs((prevBlobs) => ({
-          ...prevBlobs,
-          [timestamp]: audioBlob,
-        }));
+          // Store the blob with a unique key
+          const timestamp = Date.now().toString();
+          setAudioBlobs((prevBlobs) => ({
+            ...prevBlobs,
+            [timestamp]: audioBlob,
+          }));
 
-        // Add an event to realtimeEvents
-        const realtimeEvent: RealtimeEvent = {
-          time: new Date().toISOString(),
-          source: 'client',
-          event: {
-            type: 'audio_recording',
-            audioBlobKey: timestamp,
-          },
-        };
-        setRealtimeEvents((prev) => [...prev, realtimeEvent]);
+          // Add an event to realtimeEvents
+          const realtimeEvent: RealtimeEvent = {
+            time: new Date().toISOString(),
+            source: 'client',
+            event: {
+              type: 'audio_recording',
+              audioBlobKey: timestamp,
+            },
+          };
+          setRealtimeEvents((prev) => [...prev, realtimeEvent]);
 
-        // Clear audio chunks
-        audioChunksRef.current = [];
+          // Clear audio chunks
+          audioChunksRef.current = [];
+
+          // Clear wavRecorder's internal buffer
+          await wavRecorder.clear();
+        }
+      } catch (error) {
+        console.error('Error stopping recording:', error);
       }
     } else {
       console.warn('Recording was not started');
