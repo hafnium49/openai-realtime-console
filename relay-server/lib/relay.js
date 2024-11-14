@@ -71,23 +71,21 @@ export class RealtimeRelay {
 
     // Handle both binary and text messages
     ws.on('message', (data, isBinary) => {
-      this.log(`Received message: isBinary=${isBinary}, size=${data.length || 0} bytes`);
+      this.log(`Received message: isBinary=${isBinary}`);
       try {
         if (isBinary) {
           // Handle binary audio data
           const audioData = new Int16Array(data);
-          this.log(`Processing binary audio chunk: ${audioData.length} samples`);
+          this.log(`Received binary audio chunk: ${audioData.length} samples`);
           
           // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
           this.audioChunks.set(ws, chunks);
-          this.log(`Total chunks stored: ${chunks.length}`);
 
           // Send to OpenAI
           if (this.client) {
             this.client.appendInputAudio(audioData);
-            this.log('Audio chunk sent to OpenAI');
           }
 
           // Log the audio event
@@ -160,8 +158,8 @@ export class RealtimeRelay {
           }
         }
       } catch (e) {
-        console.error('Error processing message:', e);
-        this.log(`Error processing message: ${e.message}`);
+        console.error(e.message);
+        this.log(`Error parsing event from React UI: ${data}`);
       }
     });
 
