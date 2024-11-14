@@ -309,18 +309,13 @@ export function ConsolePage() {
     try {
       await wavRecorder.record((data) => {
         console.log('wavRecorder.record callback called');
-        if (!data || !data.mono || !data.mono.buffer) {
+        if (!data || !data.mono || !data.mono.length) {
           console.error('Received undefined or invalid data from the recorder');
           return;
         }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          // Convert Float32Array to Int16Array
-          const floatSamples = data.mono;
-          const int16Samples = new Int16Array(floatSamples.length);
-          for (let i = 0; i < floatSamples.length; i++) {
-            let s = Math.max(-1, Math.min(1, floatSamples[i]));
-            int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-          }
+          // data.mono is already an Int16Array
+          const int16Samples = data.mono;
 
           // Send int16Samples directly
           console.log('Sending audio chunk:', int16Samples.length * 2, 'bytes');
@@ -332,10 +327,10 @@ export function ConsolePage() {
             source: 'client',
             event: {
               type: 'input_audio_buffer.append',
-              audio: `[audio chunk: ${int16Samples.length * 2} bytes]`
-            }
+              audio: `[audio chunk: ${int16Samples.length * 2} bytes]`,
+            },
           };
-          setRealtimeEvents(prev => [...prev, realtimeEvent]);
+          setRealtimeEvents((prev) => [...prev, realtimeEvent]);
         } else {
           console.warn('WebSocket is not open. Cannot send audio data.');
         }
