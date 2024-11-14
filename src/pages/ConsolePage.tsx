@@ -144,19 +144,33 @@ export function ConsolePage() {
     // Connect to relay server
     const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
 
-    // Use custom WebSocket factory to set binaryType
+    // Create a custom WebSocket class instead of a factory function
+    class CustomWebSocket extends WebSocket {
+      constructor(url: string, protocols?: string | string[]) {
+        super(url, protocols);
+        this.binaryType = 'arraybuffer';
+      }
+    }
+
+    // Pass the custom class to ReconnectingWebSocket
     const ws = new ReconnectingWebSocket(wsUrl, [], {
-      WebSocket: function (url: string, protocols: string | string[] | undefined) {
-        const ws = new WebSocket(url, protocols);
-        ws.binaryType = 'arraybuffer';
-        return ws;
-      },
+      WebSocket: CustomWebSocket
     });
 
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log('Connected to relay server');
+      // Send initial message to OpenAI via relay server
+      const initialMessage = {
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          text: 'Hello!',
+        },
+      };
+      ws.send(JSON.stringify(initialMessage));
     };
 
     ws.onmessage = async (event) => {
@@ -259,19 +273,6 @@ export function ConsolePage() {
     ws.onclose = () => {
       console.log('Disconnected from relay server');
       setIsConnected(false);
-    };
-
-    // Send initial message to OpenAI via relay server
-    const initialMessage = {
-      type: 'conversation.item.create',
-      item: {
-        type: 'message', // Changed from 'user_message' to 'message'
-        role: 'user', // Added 'role' here
-        text: 'Hello!',
-      },
-    };
-    ws.onopen = () => {
-      ws.send(JSON.stringify(initialMessage));
     };
 
     // Connect to microphone
