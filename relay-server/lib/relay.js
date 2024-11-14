@@ -68,6 +68,26 @@ export class RealtimeRelay {
     // Initialize audioChunks for this ws
     this.audioChunks.set(ws, []);
 
+    // Add message handler for audio data
+    ws.on('message', async (data) => {
+      try {
+        // Assuming audio is sent as binary data
+        if (data instanceof Buffer) {
+          const chunks = this.audioChunks.get(ws);
+          chunks.push(data);
+          this.audioChunks.set(ws, chunks);
+          
+          // Optional: Log received audio chunk
+          this.logEvent('audio', 'chunk_received', {
+            size: data.length,
+            totalChunks: chunks.length
+          });
+        }
+      } catch (error) {
+        this.logEvent('error', 'audio_processing', error.message);
+      }
+    });
+
     // Instantiate the client if not already connected
     if (!this.client) {
       await this.initializeOpenAIClient(ws);
