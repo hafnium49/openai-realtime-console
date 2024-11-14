@@ -244,12 +244,12 @@ export function ConsolePage() {
   /**
    * Start and stop recording
    */
-  const startRecording = () => {
+  const startRecording = async () => {
     setIsRecording(true);
     setAudioChunks([]); // Reset audio chunks
     const wavRecorder = wavRecorderRef.current;
     try {
-      wavRecorder.record((data) => {
+      await wavRecorder.record((data) => {
         if (!data || !data.mono || !data.mono.buffer) {
           console.error('Received undefined or invalid data from the recorder');
           return;
@@ -277,11 +277,11 @@ export function ConsolePage() {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     setIsRecording(false);
     const wavRecorder = wavRecorderRef.current;
-    if (wavRecorder.recording) {
-      wavRecorder.pause();
+    if (wavRecorder.getStatus() === 'recording') {
+      await wavRecorder.pause();
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const commitEvent = {
           type: 'audio_commit',
@@ -394,7 +394,7 @@ export function ConsolePage() {
           clientCtx = clientCtx || clientCanvas.getContext('2d');
           if (clientCtx) {
             clientCtx.clearRect(0, 0, clientCanvas.width, clientCanvas.height);
-            const result = wavRecorder.recording
+            const result = wavRecorder.getStatus() === 'recording'
               ? wavRecorder.getFrequencies('voice')
               : { values: new Float32Array([0]) };
             WavRenderer.drawBars(
