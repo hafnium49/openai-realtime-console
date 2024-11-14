@@ -309,15 +309,14 @@ export function ConsolePage() {
     try {
       await wavRecorder.record((data) => {
         console.log('wavRecorder.record callback called');
-        if (!data || !data.mono || !data.mono.length) {
+        console.log('Received data:', data);
+        if (!data || !data.mono || !data.mono.byteLength) {
           console.error('Received undefined or invalid data from the recorder');
           return;
         }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          // data.mono is already an Int16Array
-          const int16Samples = data.mono;
-
-          // Send int16Samples directly
+          // Convert data.mono (ArrayBuffer) to Int16Array
+          const int16Samples = new Int16Array(data.mono);
           console.log('Sending audio chunk:', int16Samples.length * 2, 'bytes');
           wsRef.current.send(int16Samples);
           audioChunksRef.current.push(int16Samples);
