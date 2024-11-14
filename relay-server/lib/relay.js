@@ -60,7 +60,10 @@ export class RealtimeRelay {
   async reactConnectionHandler(ws, req) {
     // Add the WebSocket connection to the set
     this.connectedClients.add(ws);
-    this.logEvent('react', 'connected', 'New React client connected');
+    this.logEvent('react', 'connected', { 
+      remoteAddress: req.socket.remoteAddress,
+      timestamp: new Date().toISOString()
+    });
 
     // Initialize audioChunks for this ws
     this.audioChunks.set(ws, []);
@@ -72,15 +75,16 @@ export class RealtimeRelay {
 
     // Handle both binary and text messages
     ws.on('message', (data, isBinary) => {
-      this.log(`Received message: isBinary=${isBinary}`);
+      this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength} bytes`);
       try {
         if (isBinary) {
-          // Handle binary audio data
-          const audioData = new Int16Array(data);
-          this.logEvent('react', 'received_audio', { 
-            size: audioData.length,
-            timestamp: new Date().toISOString()
-          });
+          // Create a buffer from the raw data
+          const buffer = Buffer.from(data);
+          
+          // Convert buffer to Int16Array
+          const audioData = new Int16Array(new Uint8Array(buffer).buffer);
+          
+          this.log(`Processing audio chunk: ${audioData.length} samples`);
           
           // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
@@ -90,6 +94,10 @@ export class RealtimeRelay {
           // Send to OpenAI
           if (this.client) {
             this.client.appendInputAudio(audioData);
+            this.logEvent('react', 'audio_processed', { 
+              samples: audioData.length,
+              totalChunks: chunks.length 
+            });
           }
 
           // Log the audio event
@@ -163,7 +171,10 @@ export class RealtimeRelay {
           }
         }
       } catch (e) {
-        this.logEvent('react', 'error', { error: e.message, data: data.toString() });
+        this.logEvent('react', 'error', { 
+          error: e.message, 
+          data: isBinary ? 'binary data' : data.toString() 
+        });
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
       }

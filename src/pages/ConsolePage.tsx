@@ -11,8 +11,6 @@ import { Map } from '../components/Map';
 
 import './ConsolePage.scss';
 
-import ReconnectingWebSocket from 'reconnecting-websocket';
-
 /**
  * Type for result from get_weather() function call
  */
@@ -65,7 +63,7 @@ export function ConsolePage() {
     new WavStreamPlayer({ sampleRate: 24000 })
   );
 
-  const wsRef = useRef<ReconnectingWebSocket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   /**
    * References for
@@ -141,22 +139,10 @@ export function ConsolePage() {
     // Connect to audio output
     await wavStreamPlayer.connect();
 
-    // Connect to relay server
+    // Connect to relay server using standard WebSocket
     const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
-
-    // Create a custom WebSocket class instead of a factory function
-    class CustomWebSocket extends WebSocket {
-      constructor(url: string, protocols?: string | string[]) {
-        super(url, protocols);
-        this.binaryType = 'arraybuffer';
-      }
-    }
-
-    // Pass the custom class to ReconnectingWebSocket
-    const ws = new ReconnectingWebSocket(wsUrl, [], {
-      WebSocket: CustomWebSocket
-    });
-
+    const ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -171,6 +157,10 @@ export function ConsolePage() {
         },
       };
       ws.send(JSON.stringify(initialMessage));
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
     };
 
     ws.onmessage = async (event) => {
@@ -322,11 +312,16 @@ export function ConsolePage() {
           console.error('Received undefined or invalid data from the recorder');
           return;
         }
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          // Send audio data as binary
-          wsRef.current.send(data.mono.buffer);
-          // Use audioChunksRef to accumulate audio chunks
-          audioChunksRef.current.push(new Int16Array(data.mono.buffer));
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          // Create a copy of the buffer to ensure it's detached
+          const audioBuffer = data.mono.buffer.slice(0);
+          console.log('Sending audio chunk:', audioBuffer.byteLength, 'bytes');
+          
+          // Send the copied buffer
+          wsRef.current.send(audioBuffer);
+          
+          // Store the audio chunk
+          audioChunksRef.current.push(new Int16Array(audioBuffer));
 
           // Add realtime event for visualization
           const realtimeEvent: RealtimeEvent = {
@@ -334,10 +329,12 @@ export function ConsolePage() {
             source: 'client',
             event: {
               type: 'input_audio_buffer.append',
-              audio: `[audio chunk: ${data.mono.buffer.byteLength} bytes]`
+              audio: `[audio chunk: ${audioBuffer.byteLength} bytes]`
             }
           };
           setRealtimeEvents(prev => [...prev, realtimeEvent]);
+        } else {
+          console.warn('WebSocket is not open. Cannot send audio data.');
         }
       });
     } catch (error) {
