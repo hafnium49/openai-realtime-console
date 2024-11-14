@@ -266,12 +266,10 @@ export class RealtimeRelay {
       originalSend(eventName, payload);
     };
 
-    // Wrap the emit method to log all incoming events
-    const originalEmit = this.client.emit.bind(this.client);
-    this.client.emit = (eventName, ...args) => {
-      this.logEvent('openai', 'received', { eventName, args });
-      return originalEmit(eventName, ...args);
-    };
+    // Listen for incoming events
+    this.client.realtime.on('message', (message) => {
+      this.logEvent('openai', 'received', { message });
+    });
 
     // Connect to OpenAI Realtime API
     try {
