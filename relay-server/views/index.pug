@@ -43,7 +43,7 @@ html(lang="en")
       .source { color: #4ec9b0; }
       .type { color: #ce9178; }
       .data { color: #9cdcfe; }
-      .openai { color: #4ec9b0; }
+      .openai { color: #dcdcaa; }
       .react { color: #9cdcfe; }
       .chemistry3d { color: #dcdcaa; }
       .system { color: #569cd6; }
@@ -77,7 +77,16 @@ html(lang="en")
       socket.on('log', (log) => {
         const entry = document.createElement('div');
         entry.className = 'log-entry';
-        let dataContent = JSON.stringify(log.data);
+
+        let dataContent = JSON.stringify(log.data, null, 2);
+
+        // Format log messages from OpenAI
+        if (log.source === 'openai') {
+          dataContent = `
+            <div><strong>Event:</strong> ${log.data.eventName}</div>
+            <div><strong>Data:</strong> <pre>${JSON.stringify(log.data.payload || log.data.data, null, 2)}</pre></div>
+          `;
+        }
 
         // If log type is 'audio_recording', create an audio element
         if (log.type === 'audio_recording' && log.data.audioBase64) {
