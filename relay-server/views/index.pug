@@ -91,32 +91,28 @@ html(lang="en")
         const entry = document.createElement('div');
         entry.className = 'log-entry';
 
-        let dataContent = JSON.stringify(log.data, null, 2);
+        let dataContent = '';
 
-        // Format log messages from OpenAI
+        // Format log messages based on source and type
         if (log.source === 'openai') {
           dataContent = `
             <div><strong>Event:</strong> ${log.data.eventName}</div>
             <div><strong>Data:</strong> <pre>${JSON.stringify(log.data.payload || log.data.data, null, 2)}</pre></div>
           `;
-        } else if (log.source === 'react') {
-          if (log.type === 'received_audio') {
-            dataContent = `Audio chunk: ${log.data.size} samples`;
+        } else if (log.source === 'client') {
+          if (log.type === 'audio_chunk_received') {
+            dataContent = `Audio chunk: ${log.data.size} samples (${log.data.byteLength} bytes). Total chunks: ${log.data.totalChunks}`;
+          } else if (log.type === 'audio_recording' && log.data.audioBase64) {
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = 'data:audio/wav;base64,' + log.data.audioBase64;
+            dataContent = '';
+            entry.appendChild(audio);
           } else {
-            dataContent = `
-              <div><strong>${log.type}:</strong></div>
-              <pre>${JSON.stringify(log.data, null, 2)}</pre>
-            `;
+            dataContent = `<pre>${JSON.stringify(log.data, null, 2)}</pre>`;
           }
-        }
-
-        // If log type is 'audio_recording', create an audio element
-        if (log.type === 'audio_recording' && log.data.audioBase64) {
-          const audio = document.createElement('audio');
-          audio.controls = true;
-          audio.src = 'data:audio/wav;base64,' + log.data.audioBase64;
-          dataContent = '';
-          entry.appendChild(audio);
+        } else {
+          // ...existing default case...
         }
 
         entry.innerHTML += `

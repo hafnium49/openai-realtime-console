@@ -75,23 +75,25 @@ export class RealtimeRelay {
       this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength || data.length} bytes`);
       try {
         if (isBinary) {
-          // Handle binary data
-          this.log(`Received binary audio chunk: ${data.length} bytes`);
-
+          // Create a buffer from the raw data
+          const buffer = Buffer.from(data);
+          
           // Convert buffer to Int16Array
-          const audioData = new Int16Array(data.buffer, data.byteOffset, data.byteLength / Int16Array.BYTES_PER_ELEMENT);
-          this.log(`Processing audio chunk: ${audioData.length} samples`);
-
-          // Store and process audio chunk
+          const audioData = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.byteLength / Int16Array.BYTES_PER_ELEMENT);
+          
+          // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
           this.audioChunks.set(ws, chunks);
 
+          // Send to OpenAI and log the event
           if (this.client) {
             this.client.appendInputAudio(audioData);
-            this.logEvent('react', 'audio_processed', { 
-              samples: audioData.length,
-              totalChunks: chunks.length 
+            this.logEvent('client', 'audio_chunk_received', {
+              size: audioData.length,
+              totalChunks: chunks.length,
+              byteLength: buffer.byteLength,
+              timestamp: new Date().toISOString()
             });
           }
         } else {
