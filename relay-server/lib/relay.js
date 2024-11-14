@@ -71,6 +71,7 @@ export class RealtimeRelay {
 
     // Handle both binary and text messages
     ws.on('message', (data, isBinary) => {
+      this.log(`Received message: isBinary=${isBinary}`);
       try {
         if (isBinary) {
           // Handle binary audio data

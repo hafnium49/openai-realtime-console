@@ -143,8 +143,16 @@ export function ConsolePage() {
 
     // Connect to relay server
     const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
-    const ws = new ReconnectingWebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer'; // Set binary type for audio data
+
+    // Use custom WebSocket factory to set binaryType
+    const ws = new ReconnectingWebSocket(wsUrl, [], {
+      WebSocket: function (url: string, protocols: string | string[] | undefined) {
+        const ws = new WebSocket(url, protocols);
+        ws.binaryType = 'arraybuffer';
+        return ws;
+      },
+    });
+
     wsRef.current = ws;
 
     ws.onopen = () => {
