@@ -313,17 +313,21 @@ export function ConsolePage() {
           return;
         }
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          // Create a copy of the buffer to ensure it's detached
-          const audioBuffer = data.mono.buffer.slice(0);
-          console.log('Sending audio chunk:', audioBuffer.byteLength, 'bytes');
-          
-          // Send the copied buffer
-          wsRef.current.send(audioBuffer);
-          
-          // Store the audio chunk
-          audioChunksRef.current.push(new Int16Array(audioBuffer));
+          // Convert Float32Array to Int16Array
+          const floatSamples = data.mono;
+          const int16Samples = new Int16Array(floatSamples.length);
+          for (let i = 0; i < floatSamples.length; i++) {
+            let s = Math.max(-1, Math.min(1, floatSamples[i]));
+            int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
 
-          // Add realtime event for visualization
+          // Send int16Samples.buffer
+          const audioBuffer = int16Samples.buffer;
+          console.log('Sending audio chunk:', audioBuffer.byteLength, 'bytes');
+
+          wsRef.current.send(audioBuffer);
+          audioChunksRef.current.push(int16Samples);
+
           const realtimeEvent: RealtimeEvent = {
             time: new Date().toISOString(),
             source: 'client',

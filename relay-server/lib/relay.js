@@ -58,60 +58,35 @@ export class RealtimeRelay {
   }
 
   async reactConnectionHandler(ws, req) {
-    // Add the WebSocket connection to the set
     this.connectedClients.add(ws);
     this.logEvent('react', 'connected', { 
       remoteAddress: req.socket.remoteAddress,
       timestamp: new Date().toISOString()
     });
 
-    // Initialize audioChunks for this ws
     this.audioChunks.set(ws, []);
 
-    // Add message handler for audio data
-    ws.on('message', async (data) => {
-      try {
-        // Assuming audio is sent as binary data
-        if (data instanceof Buffer) {
-          const chunks = this.audioChunks.get(ws);
-          chunks.push(data);
-          this.audioChunks.set(ws, chunks);
-          
-          // Optional: Log received audio chunk
-          this.logEvent('audio', 'chunk_received', {
-            size: data.length,
-            totalChunks: chunks.length
-          });
-        }
-      } catch (error) {
-        this.logEvent('error', 'audio_processing', error.message);
-      }
-    });
-
-    // Instantiate the client if not already connected
     if (!this.client) {
       await this.initializeOpenAIClient(ws);
     }
 
-    // Handle both binary and text messages
+    // Single message handler for both binary and text
     ws.on('message', (data, isBinary) => {
-      this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength} bytes`);
+      this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength || data.length} bytes`);
       try {
         if (isBinary) {
-          // Create a buffer from the raw data
-          const buffer = Buffer.from(data);
-          
+          // Handle binary data
+          this.log(`Received binary audio chunk: ${data.length} bytes`);
+
           // Convert buffer to Int16Array
-          const audioData = new Int16Array(new Uint8Array(buffer).buffer);
-          
+          const audioData = new Int16Array(data.buffer, data.byteOffset, data.byteLength / Int16Array.BYTES_PER_ELEMENT);
           this.log(`Processing audio chunk: ${audioData.length} samples`);
-          
-          // Store audio chunk
+
+          // Store and process audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
           this.audioChunks.set(ws, chunks);
 
-          // Send to OpenAI
           if (this.client) {
             this.client.appendInputAudio(audioData);
             this.logEvent('react', 'audio_processed', { 
@@ -119,12 +94,6 @@ export class RealtimeRelay {
               totalChunks: chunks.length 
             });
           }
-
-          // Log the audio event
-          this.logEvent('client', 'audio_chunk', { 
-            size: audioData.length,
-            timestamp: new Date().toISOString()
-          });
         } else {
           // Handle text messages (JSON)
           const event = JSON.parse(data.toString());
