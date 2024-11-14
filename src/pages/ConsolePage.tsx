@@ -11,8 +11,6 @@ import { Map } from '../components/Map';
 
 import './ConsolePage.scss';
 
-import ReconnectingWebSocket from 'reconnecting-websocket';
-
 /**
  * Type for result from get_weather() function call
  */
@@ -65,7 +63,7 @@ export function ConsolePage() {
     new WavStreamPlayer({ sampleRate: 24000 })
   );
 
-  const wsRef = useRef<ReconnectingWebSocket | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   /**
    * References for
@@ -141,21 +139,10 @@ export function ConsolePage() {
     // Connect to audio output
     await wavStreamPlayer.connect();
 
-    // Connect to relay server
+    // Connect to relay server using standard WebSocket
     const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
-
-    // Create a custom WebSocket class instead of a factory function
-    class CustomWebSocket extends WebSocket {
-      constructor(url: string, protocols?: string | string[]) {
-        super(url, protocols);
-        this.binaryType = 'arraybuffer';
-      }
-    }
-
-    // Pass the custom class to ReconnectingWebSocket
-    const ws = new ReconnectingWebSocket(wsUrl, [], {
-      WebSocket: CustomWebSocket
-    });
+    const ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
 
     wsRef.current = ws;
 
@@ -270,6 +257,10 @@ export function ConsolePage() {
       }
     };
 
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
     ws.onclose = () => {
       console.log('Disconnected from relay server');
       setIsConnected(false);
@@ -323,7 +314,7 @@ export function ConsolePage() {
           return;
         }
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          // Send audio data as binary
+          console.log(`Sending audio chunk: ${data.mono.buffer.byteLength} bytes`);
           wsRef.current.send(data.mono.buffer);
           // Use audioChunksRef to accumulate audio chunks
           audioChunksRef.current.push(new Int16Array(data.mono.buffer));
@@ -338,6 +329,8 @@ export function ConsolePage() {
             }
           };
           setRealtimeEvents(prev => [...prev, realtimeEvent]);
+        } else {
+          console.warn('WebSocket is not open. Cannot send audio data.');
         }
       });
     } catch (error) {
