@@ -98,7 +98,7 @@ export function ConsolePage() {
   const [marker, setMarker] = useState<Coordinates | null>(null);
 
   // Add state to store audio chunks and blobs
-  const [audioChunks, setAudioChunks] = useState<Int16Array[]>([]);
+  const audioChunksRef = useRef<Int16Array[]>([]);
   const [audioBlobs, setAudioBlobs] = useState<{ [key: string]: Blob }>({});
 
   // Add state to store output audio chunks and blobs
@@ -305,8 +305,8 @@ export function ConsolePage() {
    */
   const startRecording = async () => {
     setIsRecording(true);
-    setAudioChunks([]); // Reset audio chunks
     const wavRecorder = wavRecorderRef.current;
+    audioChunksRef.current = []; // Reset audio chunks
     try {
       await wavRecorder.record((data) => {
         if (!data || !data.mono || !data.mono.buffer) {
@@ -316,7 +316,8 @@ export function ConsolePage() {
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           // Send audio data as binary
           wsRef.current.send(data.mono.buffer);
-          setAudioChunks((prevChunks) => [...prevChunks, new Int16Array(data.mono.buffer)]);
+          // Use audioChunksRef to accumulate audio chunks
+          audioChunksRef.current.push(new Int16Array(data.mono.buffer));
 
           // Add realtime event for visualization
           const realtimeEvent: RealtimeEvent = {
@@ -347,23 +348,16 @@ export function ConsolePage() {
         };
         wsRef.current.send(JSON.stringify(commitEvent));
 
-        // Reconstruct audio blob and store it
-        const allAudioData = audioChunks.reduce((acc, chunk) => {
-          const newData = new Int16Array(acc.length + chunk.length);
-          newData.set(acc);
-          newData.set(chunk, acc.length);
-          return newData;
-        }, new Int16Array());
-        const audioBuffer = new ArrayBuffer(allAudioData.length * 2);
-        const view = new DataView(audioBuffer);
-        for (let i = 0; i < allAudioData.length; i++) {
-          view.setInt16(i * 2, allAudioData[i], true);
-        }
-        const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
+        // Use wavRecorder.save() to get the recorded audio
+        const result = await wavRecorder.save();
+        const audioBlob = result.blob;
 
         // Store the blob with a unique key
         const timestamp = Date.now().toString();
-        setAudioBlobs((prevBlobs) => ({ ...prevBlobs, [timestamp]: audioBlob }));
+        setAudioBlobs((prevBlobs) => ({
+          ...prevBlobs,
+          [timestamp]: audioBlob,
+        }));
 
         // Add an event to realtimeEvents
         const realtimeEvent: RealtimeEvent = {
@@ -377,7 +371,7 @@ export function ConsolePage() {
         setRealtimeEvents((prev) => [...prev, realtimeEvent]);
 
         // Clear audio chunks
-        setAudioChunks([]);
+        audioChunksRef.current = [];
       }
     } else {
       console.warn('Recording was not started');
