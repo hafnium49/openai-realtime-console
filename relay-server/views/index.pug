@@ -44,9 +44,22 @@ html(lang="en")
       .type { color: #ce9178; }
       .data { color: #9cdcfe; }
       .openai { color: #dcdcaa; }
-      .react { color: #9cdcfe; }
+      .react { color: #61dafb; }  // React's official color
       .chemistry3d { color: #dcdcaa; }
       .system { color: #569cd6; }
+      .sent { opacity: 0.8; }
+      .received { opacity: 1; }
+      .error { color: #ff6b6b; }
+      pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #1e1e1e;
+        padding: 8px;
+        border-radius: 4px;
+        margin-top: 4px;
+      }
 
   body
     div#app
@@ -86,6 +99,15 @@ html(lang="en")
             <div><strong>Event:</strong> ${log.data.eventName}</div>
             <div><strong>Data:</strong> <pre>${JSON.stringify(log.data.payload || log.data.data, null, 2)}</pre></div>
           `;
+        } else if (log.source === 'react') {
+          if (log.type === 'received_audio') {
+            dataContent = `Audio chunk: ${log.data.size} samples`;
+          } else {
+            dataContent = `
+              <div><strong>${log.type}:</strong></div>
+              <pre>${JSON.stringify(log.data, null, 2)}</pre>
+            `;
+          }
         }
 
         // If log type is 'audio_recording', create an audio element
@@ -99,7 +121,7 @@ html(lang="en")
 
         entry.innerHTML += `
           <span class="timestamp">[${new Date(log.timestamp).toLocaleTimeString()}]</span>
-          <span class="source ${log.source}">[${log.source}]</span>
+          <span class="source ${log.source} ${log.type}">[${log.source}]</span>
           <span class="type">${log.type}</span>
           <span class="data">${dataContent}</span>
         `;

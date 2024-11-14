@@ -60,6 +60,7 @@ export class RealtimeRelay {
   async reactConnectionHandler(ws, req) {
     // Add the WebSocket connection to the set
     this.connectedClients.add(ws);
+    this.logEvent('react', 'connected', 'New React client connected');
 
     // Initialize audioChunks for this ws
     this.audioChunks.set(ws, []);
@@ -76,7 +77,10 @@ export class RealtimeRelay {
         if (isBinary) {
           // Handle binary audio data
           const audioData = new Int16Array(data);
-          this.log(`Received binary audio chunk: ${audioData.length} samples`);
+          this.logEvent('react', 'received_audio', { 
+            size: audioData.length,
+            timestamp: new Date().toISOString()
+          });
           
           // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
@@ -96,6 +100,7 @@ export class RealtimeRelay {
         } else {
           // Handle text messages (JSON)
           const event = JSON.parse(data.toString());
+          this.logEvent('react', 'received', { type: event.type, data: event });
           this.log(`Received event from React UI: ${event.type}`);
 
           if (event.type === 'audio_commit') {
@@ -158,12 +163,14 @@ export class RealtimeRelay {
           }
         }
       } catch (e) {
+        this.logEvent('react', 'error', { error: e.message, data: data.toString() });
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
       }
     });
 
     ws.on('close', () => {
+      this.logEvent('react', 'disconnected', 'React client disconnected');
       this.audioChunks.delete(ws);
       this.connectedClients.delete(ws);
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
@@ -356,6 +363,7 @@ export class RealtimeRelay {
     };
     for (const clientWs of this.connectedClients) {
       clientWs.send(JSON.stringify(statusEvent));
+      this.logEvent('react', 'sent', { type: 'status', data: status });
     }
   }
 
