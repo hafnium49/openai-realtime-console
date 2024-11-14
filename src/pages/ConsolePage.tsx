@@ -302,12 +302,15 @@ export function ConsolePage() {
   /**
    * Start and stop recording
    */
-  const startRecording = async () => {
+  const startRecording = () => {
     setIsRecording(true);
     const wavRecorder = wavRecorderRef.current;
+    console.log('Starting recording, recorder status:', wavRecorder.getStatus());
     audioChunksRef.current = []; // Reset audio chunks
     try {
-      await wavRecorder.record((data) => {
+      // Remove await - record() takes a callback
+      wavRecorder.record((data) => {
+        console.log('Received audio data from recorder:', data);
         if (!data || !data.mono || !data.mono.buffer) {
           console.error('Received undefined or invalid data from the recorder');
           return;
@@ -321,10 +324,8 @@ export function ConsolePage() {
             int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
           }
 
-          // Send int16Samples.buffer
           const audioBuffer = int16Samples.buffer;
           console.log('Sending audio chunk:', audioBuffer.byteLength, 'bytes');
-
           wsRef.current.send(audioBuffer);
           audioChunksRef.current.push(int16Samples);
 
@@ -352,7 +353,8 @@ export function ConsolePage() {
     const wavRecorder = wavRecorderRef.current;
     if (wavRecorder.getStatus() === 'recording') {
       try {
-        await wavRecorder.pause();
+        // Remove await from pause()
+        wavRecorder.pause();
         
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           // Send audio commit event
