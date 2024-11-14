@@ -302,15 +302,13 @@ export function ConsolePage() {
   /**
    * Start and stop recording
    */
-  const startRecording = () => {
+  const startRecording = async () => {
     setIsRecording(true);
     const wavRecorder = wavRecorderRef.current;
-    console.log('Starting recording, recorder status:', wavRecorder.getStatus());
     audioChunksRef.current = []; // Reset audio chunks
     try {
-      // Remove await - record() takes a callback
-      wavRecorder.record((data) => {
-        console.log('Received audio data from recorder:', data);
+      await wavRecorder.record((data) => {
+        console.log('wavRecorder.record callback called');
         if (!data || !data.mono || !data.mono.buffer) {
           console.error('Received undefined or invalid data from the recorder');
           return;
@@ -324,9 +322,9 @@ export function ConsolePage() {
             int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
           }
 
-          const audioBuffer = int16Samples.buffer;
-          console.log('Sending audio chunk:', audioBuffer.byteLength, 'bytes');
-          wsRef.current.send(audioBuffer);
+          // Send int16Samples directly
+          console.log('Sending audio chunk:', int16Samples.length * 2, 'bytes');
+          wsRef.current.send(int16Samples);
           audioChunksRef.current.push(int16Samples);
 
           const realtimeEvent: RealtimeEvent = {
@@ -334,7 +332,7 @@ export function ConsolePage() {
             source: 'client',
             event: {
               type: 'input_audio_buffer.append',
-              audio: `[audio chunk: ${audioBuffer.byteLength} bytes]`
+              audio: `[audio chunk: ${int16Samples.length * 2} bytes]`
             }
           };
           setRealtimeEvents(prev => [...prev, realtimeEvent]);
@@ -353,14 +351,13 @@ export function ConsolePage() {
     const wavRecorder = wavRecorderRef.current;
     if (wavRecorder.getStatus() === 'recording') {
       try {
-        wavRecorder.pause(); // Remove 'await'
-
+        await wavRecorder.pause();
+        
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           // Send audio commit event
           const commitEvent = {
             type: 'audio_commit',
           };
-          console.log('Sending audio_commit event');
           wsRef.current.send(JSON.stringify(commitEvent));
 
           // Save current recording

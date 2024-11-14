@@ -70,35 +70,41 @@ export class RealtimeRelay {
       await this.initializeOpenAIClient(ws);
     }
 
+    // Single message handler for both binary and text
     ws.on('message', (data, isBinary) => {
       this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength || data.length} bytes`);
       try {
         if (isBinary) {
           // Handle binary data
-          this.log(`Received binary audio chunk: ${data.length} bytes`);
-
+          const buffer = data; // data is already a Buffer
+          
           // Convert buffer to Int16Array
-          const audioData = new Int16Array(data.buffer, data.byteOffset, data.byteLength / Int16Array.BYTES_PER_ELEMENT);
+          const audioData = new Int16Array(
+            buffer.buffer, 
+            buffer.byteOffset, 
+            buffer.byteLength / Int16Array.BYTES_PER_ELEMENT
+          );
+          
           this.log(`Processing audio chunk: ${audioData.length} samples`);
-
+          
           // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
           this.audioChunks.set(ws, chunks);
 
-          // Send to OpenAI
+          // Send to OpenAI and log the event
           if (this.client) {
             this.client.appendInputAudio(audioData);
             this.logEvent('client', 'audio_chunk_received', {
               size: audioData.length,
               totalChunks: chunks.length,
+              byteLength: buffer.byteLength,
               timestamp: new Date().toISOString()
             });
           }
         } else {
           // Handle text messages (JSON)
-          const messageString = data.toString('utf8');
-          const event = JSON.parse(messageString);
+          const event = JSON.parse(data.toString());
           this.logEvent('react', 'received', { type: event.type, data: event });
           this.log(`Received event from React UI: ${event.type}`);
 
@@ -164,7 +170,7 @@ export class RealtimeRelay {
       } catch (e) {
         this.logEvent('react', 'error', { 
           error: e.message, 
-          data: isBinary ? 'binary data' : data.toString('utf8') 
+          data: isBinary ? 'binary data' : data.toString() 
         });
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
