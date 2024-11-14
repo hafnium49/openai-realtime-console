@@ -4,6 +4,8 @@ import { RealtimeClient } from '@openai/realtime-api-beta';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import express from 'express';
+import wav from 'wav';
+import { PassThrough } from 'stream';
 
 // Import instructions and function schemas
 import { instructions } from '../utils/conversation_config.js';
@@ -72,7 +74,7 @@ export class RealtimeRelay {
       try {
         if (isBinary) {
           // Handle binary audio data
-          const audioData = new Int16Array(data.buffer);
+          const audioData = new Int16Array(data);
           this.log(`Received binary audio chunk: ${audioData.length} samples`);
           
           // Store audio chunk
@@ -99,20 +101,45 @@ export class RealtimeRelay {
             // Create audio log from accumulated chunks
             const chunks = this.audioChunks.get(ws) || [];
             if (chunks.length > 0) {
-              const allAudioData = chunks.reduce((acc, chunk) => {
-                const newData = new Int16Array(acc.length + chunk.length);
-                newData.set(acc);
-                newData.set(chunk, acc.length);
-                return newData;
-              }, new Int16Array());
+              // Combine all audio chunks into a single Buffer
+              const allAudioData = Buffer.concat(
+                chunks.map((chunk) => Buffer.from(chunk.buffer))
+              );
 
-              // Convert to Base64 for logging
-              const audioBuffer = Buffer.from(allAudioData.buffer);
-              const audioBase64 = audioBuffer.toString('base64');
-              this.logEvent('client', 'audio_recording', { audioBase64 });
-              
-              // Clear chunks
-              this.audioChunks.set(ws, []);
+              // Create WAV file with proper headers
+              const writer = new wav.Writer({
+                channels: 1,
+                sampleRate: 24000,
+                bitDepth: 16,
+              });
+
+              // Use PassThrough stream to collect data
+              const passThrough = new PassThrough();
+              const wavBuffers = [];
+
+              passThrough.on('data', (data) => {
+                wavBuffers.push(data);
+              });
+
+              passThrough.on('finish', () => {
+                const wavData = Buffer.concat(wavBuffers);
+                const audioBase64 = wavData.toString('base64');
+
+                // Log the audio recording
+                this.logEvent('client', 'audio_recording', { audioBase64 });
+                this.log('Audio recording logged on backend relay server.');
+
+                // Clear chunks
+                this.audioChunks.set(ws, []);
+              });
+
+              // Pipe writer to passThrough
+              writer.pipe(passThrough);
+
+              // Write data and end the writer
+              writer.end(allAudioData);
+            } else {
+              this.log('No audio chunks to process.');
             }
 
             // Create response
@@ -337,5 +364,8 @@ export class RealtimeRelay {
       data,
       timestamp: new Date().toISOString(),
     });
+
+    // Also log to console for backend visibility
+    this.log(`[${source}] ${type}:`, data);
   }
 }
