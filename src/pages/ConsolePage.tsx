@@ -101,6 +101,10 @@ export function ConsolePage() {
   const [audioChunks, setAudioChunks] = useState<Int16Array[]>([]);
   const [audioBlobs, setAudioBlobs] = useState<{ [key: string]: Blob }>({});
 
+  // Add state to store output audio chunks and blobs
+  const [outputAudioChunks, setOutputAudioChunks] = useState<{ [key: string]: Int16Array[] }>({});
+  const [outputAudioBlobs, setOutputAudioBlobs] = useState<{ [key: string]: Blob }>({});
+
   /**
    * Utility for formatting the timing of logs
    */
@@ -175,12 +179,67 @@ export function ConsolePage() {
         }
 
         // Handle audio playback with Base64 decoding
-        if (data.delta?.audio) {
+        if (data.delta?.audio && data.item?.id) {
           try {
             const audioData = base64ToInt16Array(data.delta.audio);
             wavStreamPlayer.add16BitPCM(audioData, data.item.id);
+
+            // Store the audio data for playback
+            setOutputAudioChunks((prevChunks) => {
+              const chunks = prevChunks[data.item.id] || [];
+              return {
+                ...prevChunks,
+                [data.item.id]: [...chunks, audioData],
+              };
+            });
           } catch (error) {
             console.error('Error processing audio data:', error);
+          }
+        }
+
+        // Check if the audio is complete
+        if (data.event === 'audio_complete' && data.item?.id) {
+          const chunks = outputAudioChunks[data.item.id];
+          if (chunks) {
+            // Combine chunks into a single Int16Array
+            const allAudioData = chunks.reduce((acc, chunk) => {
+              const newData = new Int16Array(acc.length + chunk.length);
+              newData.set(acc);
+              newData.set(chunk, acc.length);
+              return newData;
+            }, new Int16Array());
+
+            // Create a Blob from the audio data
+            const audioBuffer = new ArrayBuffer(allAudioData.length * 2);
+            const view = new DataView(audioBuffer);
+            for (let i = 0; i < allAudioData.length; i++) {
+              view.setInt16(i * 2, allAudioData[i], true);
+            }
+            const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
+
+            // Store the blob
+            setOutputAudioBlobs((prevBlobs) => ({
+              ...prevBlobs,
+              [data.item.id]: audioBlob,
+            }));
+
+            // Add an event to realtimeEvents
+            const audioEvent: RealtimeEvent = {
+              time: new Date().toISOString(),
+              source: 'server',
+              event: {
+                type: 'output_audio',
+                audioBlobKey: data.item.id,
+              },
+            };
+            setRealtimeEvents((prev) => [...prev, audioEvent]);
+
+            // Remove the chunks
+            setOutputAudioChunks((prevChunks) => {
+              const updatedChunks = { ...prevChunks };
+              delete updatedChunks[data.item.id];
+              return updatedChunks;
+            });
           }
         }
       } else if (event.data instanceof ArrayBuffer) {
@@ -523,6 +582,11 @@ export function ConsolePage() {
                               src={URL.createObjectURL(
                                 audioBlobs[event.audioBlobKey]
                               )}
+                            />
+                          ) : event.type === 'output_audio' && outputAudioBlobs[event.audioBlobKey] ? (
+                            <audio
+                              controls
+                              src={URL.createObjectURL(outputAudioBlobs[event.audioBlobKey])}
                             />
                           ) : (
                             <div>{JSON.stringify(event, null, 2)}</div>
