@@ -353,14 +353,14 @@ export function ConsolePage() {
     const wavRecorder = wavRecorderRef.current;
     if (wavRecorder.getStatus() === 'recording') {
       try {
-        // Remove await from pause()
-        wavRecorder.pause();
-        
+        wavRecorder.pause(); // Remove 'await'
+
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           // Send audio commit event
           const commitEvent = {
             type: 'audio_commit',
           };
+          console.log('Sending audio_commit event');
           wsRef.current.send(JSON.stringify(commitEvent));
 
           // Save current recording

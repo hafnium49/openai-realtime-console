@@ -70,11 +70,10 @@ export class RealtimeRelay {
       await this.initializeOpenAIClient(ws);
     }
 
-    ws.on('message', (data) => {
-      const isDataBinary = Buffer.isBuffer(data);
-      this.log(`Received message: isBinary=${isDataBinary}, size=${data.byteLength || data.length} bytes`);
+    ws.on('message', (data, isBinary) => {
+      this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength || data.length} bytes`);
       try {
-        if (isDataBinary) {
+        if (isBinary) {
           // Handle binary data
           this.log(`Received binary audio chunk: ${data.length} bytes`);
 
@@ -98,7 +97,8 @@ export class RealtimeRelay {
           }
         } else {
           // Handle text messages (JSON)
-          const event = JSON.parse(data.toString());
+          const messageString = data.toString('utf8');
+          const event = JSON.parse(messageString);
           this.logEvent('react', 'received', { type: event.type, data: event });
           this.log(`Received event from React UI: ${event.type}`);
 
@@ -164,7 +164,7 @@ export class RealtimeRelay {
       } catch (e) {
         this.logEvent('react', 'error', { 
           error: e.message, 
-          data: isDataBinary ? 'binary data' : data.toString() 
+          data: isBinary ? 'binary data' : data.toString('utf8') 
         });
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
