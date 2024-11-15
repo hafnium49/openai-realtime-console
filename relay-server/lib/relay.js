@@ -45,26 +45,8 @@ export class RealtimeRelay {
       await this.reactConnectionHandler(ws, req);
     });
 
-    // Set up Socket.IO server for Chemistry3D extension with enhanced configuration
-    this.io = new SocketIOServer(server, {
-      cors: {
-        origin: '*',
-        methods: ['GET', 'POST']
-      },
-      transports: ['websocket'],
-      pingTimeout: 60000,
-      pingInterval: 25000
-    });
-
-    // Add connection event logging
-    this.io.engine.on('connection_error', (err) => {
-      this.logEvent('system', 'socketio_error', {
-        error: err.message,
-        code: err.code,
-        type: err.type
-      });
-    });
-
+    // Set up Socket.IO server for Chemistry3D extension (default path '/socket.io')
+    this.io = new SocketIOServer(server);
     this.io.on('connection', this.chemistry3dConnectionHandler.bind(this));
 
     // Set up periodic status updates
@@ -332,26 +314,12 @@ export class RealtimeRelay {
 
   chemistry3dConnectionHandler(socket) {
     this.log('Chemistry3D extension connected');
-    this.logEvent('system', 'chemistry3d_connection', {
-      id: socket.id,
-      transport: socket.conn.transport.name,
-      address: socket.handshake.address
-    });
+    this.logEvent(
+      'system',
+      'chemistry3d_connection',
+      'Chemistry3D extension connected'
+    );
     this.chemistry3dConnected = true;
-
-    // Add connection event handlers with enhanced logging
-    socket.on('connect_error', (error) => {
-      this.logEvent('chemistry3d', 'connect_error', {
-        error: error.message,
-        id: socket.id
-      });
-    });
-
-    socket.on('connect_timeout', () => {
-      this.logEvent('chemistry3d', 'connect_timeout', {
-        id: socket.id
-      });
-    });
 
     // Handle messages from Chemistry3D
     socket.on('message', (msg) => {
@@ -391,19 +359,18 @@ export class RealtimeRelay {
       this.client.realtime.send('response.create', {});
     });
 
-    socket.on('disconnect', (reason) => {
-      this.log(`Chemistry3D extension disconnected: ${reason}`);
-      this.logEvent('system', 'chemistry3d_disconnected', {
-        id: socket.id,
-        reason: reason
-      });
+    socket.on('disconnect', () => {
+      this.log('Chemistry3D extension disconnected');
+      this.logEvent(
+        'system',
+        'chemistry3d_disconnected',
+        'Chemistry3D extension disconnected'
+      );
       this.chemistry3dConnected = false;
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
-        if (this.client) {
-          this.client.disconnect();
-          this.client = null;
-        }
+        this.client.disconnect();
+        this.client = null;
       }
     });
   }
