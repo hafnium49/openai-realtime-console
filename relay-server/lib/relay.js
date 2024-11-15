@@ -32,7 +32,7 @@ export class RealtimeRelay {
 
     // Serve the index page
     this.app.get('/', (req, res) => {
-      res.render('index');
+      res.render('index', { logs: this.logs }); // Pass logs to index.pug
     });
 
     // Create an HTTP server with Express
@@ -59,9 +59,9 @@ export class RealtimeRelay {
 
   async reactConnectionHandler(ws, req) {
     this.connectedClients.add(ws);
-    this.logEvent('react', 'connected', { 
+    this.logEvent('react', 'connected', {
       remoteAddress: req.socket.remoteAddress,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
 
     this.audioChunks.set(ws, []);
@@ -72,21 +72,25 @@ export class RealtimeRelay {
 
     // Single message handler for both binary and text
     ws.on('message', (data, isBinary) => {
-      this.log(`Received message: isBinary=${isBinary}, size=${data.byteLength || data.length} bytes`);
+      this.log(
+        `Received message: isBinary=${isBinary}, size=${
+          data.byteLength || data.length
+        } bytes`
+      );
       try {
         if (isBinary) {
           // Handle binary data
           const buffer = data; // data is already a Buffer
-          
+
           // Convert buffer to Int16Array
           const audioData = new Int16Array(
-            buffer.buffer, 
-            buffer.byteOffset, 
+            buffer.buffer,
+            buffer.byteOffset,
             buffer.byteLength / Int16Array.BYTES_PER_ELEMENT
           );
-          
+
           this.log(`Processing audio chunk: ${audioData.length} samples`);
-          
+
           // Store audio chunk
           const chunks = this.audioChunks.get(ws) || [];
           chunks.push(audioData);
@@ -99,7 +103,7 @@ export class RealtimeRelay {
               size: audioData.length,
               totalChunks: chunks.length,
               byteLength: buffer.byteLength,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
             });
           }
         } else {
@@ -159,7 +163,9 @@ export class RealtimeRelay {
             }
           } else if (event.type === 'conversation.item.create') {
             // Send message to OpenAI
-            this.client.sendUserMessageContent([{ type: 'text', text: event.item.text }]);
+            this.client.sendUserMessageContent([
+              { type: 'text', text: event.item.text },
+            ]);
           } else if (event.type === 'session.update') {
             // Update session parameters
             this.client.updateSession(event.session);
@@ -168,9 +174,9 @@ export class RealtimeRelay {
           }
         }
       } catch (e) {
-        this.logEvent('react', 'error', { 
-          error: e.message, 
-          data: isBinary ? 'binary data' : data.toString() 
+        this.logEvent('react', 'error', {
+          error: e.message,
+          data: isBinary ? 'binary data' : data.toString(),
         });
         console.error(e.message);
         this.log(`Error parsing event from React UI: ${data}`);
@@ -190,7 +196,12 @@ export class RealtimeRelay {
   }
 
   async initializeOpenAIClient(ws) {
-    this.log(`Connecting to OpenAI Realtime API with key "${this.apiKey.slice(0, 3)}..."`);
+    this.log(
+      `Connecting to OpenAI Realtime API with key "${this.apiKey.slice(
+        0,
+        3
+      )}..."`
+    );
     this.client = new RealtimeClient({ apiKey: this.apiKey });
 
     // Set instructions and other session configurations
@@ -303,12 +314,18 @@ export class RealtimeRelay {
 
   chemistry3dConnectionHandler(socket) {
     this.log('Chemistry3D extension connected');
-    this.logEvent('system', 'chemistry3d_connection', 'Chemistry3D extension connected');
+    this.logEvent(
+      'system',
+      'chemistry3d_connection',
+      'Chemistry3D extension connected'
+    );
     this.chemistry3dConnected = true;
 
     // Handle messages from Chemistry3D
     socket.on('message', (msg) => {
       this.log(`Received message from Chemistry3D: ${msg}`);
+      this.logEvent('chemistry3d', 'received', { message: msg });
+
       if (!this.client || !this.client.isConnected()) {
         // Queue message if client isn't connected
         this.chemistry3dMessageQueue.push(msg);
@@ -318,11 +335,14 @@ export class RealtimeRelay {
 
       // Send message to OpenAI
       this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
+      this.logEvent('openai', 'sent', { type: 'user_message', content: msg });
     });
 
     // Handle function call outputs from Chemistry3D
     socket.on('function_call_output', (data) => {
       this.log('Received function call output from Chemistry3D');
+      this.logEvent('chemistry3d', 'function_call_output', data);
+
       if (!this.client || !this.client.isConnected()) {
         this.log('No OpenAI client connected');
         return;
@@ -341,6 +361,11 @@ export class RealtimeRelay {
 
     socket.on('disconnect', () => {
       this.log('Chemistry3D extension disconnected');
+      this.logEvent(
+        'system',
+        'chemistry3d_disconnected',
+        'Chemistry3D extension disconnected'
+      );
       this.chemistry3dConnected = false;
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
@@ -351,9 +376,13 @@ export class RealtimeRelay {
   }
 
   processQueuedMessages() {
-    while (this.chemistry3dMessageQueue.length > 0 && this.client?.isConnected()) {
+    while (
+      this.chemistry3dMessageQueue.length > 0 &&
+      this.client?.isConnected()
+    ) {
       const msg = this.chemistry3dMessageQueue.shift();
       this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
+      this.logEvent('openai', 'sent', { type: 'user_message', content: msg });
     }
   }
 
