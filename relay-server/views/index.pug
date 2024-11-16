@@ -70,59 +70,90 @@ html(lang="en")
         h2 Event Log
         div#log-content
 
-    script(src="/socket.io/socket.io.js")
-    script(src="https://code.jquery.com/jquery-1.11.1.js")
     script.
-      const socket = io();
       const statusContent = document.getElementById('status-content');
       const logContent = document.getElementById('log-content');
 
-      // Update status
-      socket.on('status', (status) => {
-        statusContent.innerHTML = `
-          <div>OpenAI Connected: ${status.isConnected}</div>
-          <div>WebSocket Clients: ${status.connectedClients}</div>
-          <div>Last Update: ${new Date(status.timestamp).toLocaleTimeString()}</div>
-        `;
-      });
+      // Initialize WebSocket connection
+      const socket = new WebSocket(`ws://${location.host}/ws`);
 
-      // Add log entry
-      socket.on('log', (log) => {
-        const entry = document.createElement('div');
-        entry.className = 'log-entry';
+      socket.onopen = () => {
+        console.log('Connected to server');
+      };
 
-        let dataContent = '';
+      socket.onmessage = (event) => {
+        const log = JSON.parse(event.data);
 
-        // Format log messages based on source and type
-        if (log.source === 'openai') {
-          dataContent = `
-            <div><strong>Event:</strong> ${log.data.eventName}</div>
-            <div><strong>Data:</strong> <pre>${JSON.stringify(log.data.payload || log.data.data, null, 2)}</pre></div>
+        // Update status
+        if (log.type === 'status') {
+          statusContent.innerHTML = `
+            <div>OpenAI Connected: ${log.isConnected}</div>
+            <div>WebSocket Clients: ${log.connectedClients}</div>
+            <div>Chemistry3D Connected: ${log.chemistry3dConnected}</div>
+            <div>Last Update: ${new Date(log.timestamp).toLocaleTimeString()}</div>
           `;
-        } else if (log.source === 'client') {
-          if (log.type === 'audio_chunk_received') {
-            dataContent = `Audio chunk: ${log.data.size} samples (${log.data.byteLength} bytes). Total chunks: ${log.data.totalChunks}`;
-          } else if (log.type === 'audio_recording' && log.data.audioBase64) {
-            const audio = document.createElement('audio');
-            audio.controls = true;
-            audio.src = 'data:audio/wav;base64,' + log.data.audioBase64;
-            dataContent = '';
-            entry.appendChild(audio);
-          } else {
-            dataContent = `<pre>${JSON.stringify(log.data, null, 2)}</pre>`;
-          }
         } else {
-          // ...existing default case...
-        }
+          // Add log entry
+          const entry = document.createElement('div');
+          entry.className = 'log-entry';
 
-        entry.innerHTML += `
-          <span class="timestamp">[${new Date(log.timestamp).toLocaleTimeString()}]</span>
-          <span class="source ${log.source} ${log.type}">[${log.source}]</span>
-          <span class="type">${log.type}</span>
-          <span class="data">${dataContent}</span>
-        `;
-        logContent.appendChild(entry);
-        logContent.scrollTop = logContent.scrollHeight;
-      });
+          let dataContent = '';
+
+          // Format log messages based on source and type
+          if (log.type === 'conversation.item.update') {
+            // Handle conversation updates
+            const item = log.item || {};
+            const delta = log.delta || {};
+            dataContent = `
+              <div><strong>Item:</strong> <pre>${JSON.stringify(item, null, 2)}</pre></div>
+              <div><strong>Delta:</strong> <pre>${JSON.stringify(delta, null, 2)}</pre></div>
+            `;
+          } else if (log.source === 'openai') {
+            dataContent = `
+              <div><strong>Event:</strong> ${log.data.eventName}</div>
+              <div><strong>Data:</strong> <pre>${JSON.stringify(log.data.payload || log.data.data, null, 2)}</pre></div>
+            `;
+          } else if (log.source === 'client') {
+            if (log.type === 'audio_chunk_received') {
+              dataContent = `Audio chunk: ${log.data.size} samples (${log.data.byteLength} bytes). Total chunks: ${log.data.totalChunks}`;
+            } else if (log.type === 'audio_recording' && log.data.audioBase64) {
+              const audio = document.createElement('audio');
+              audio.controls = true;
+              audio.src = 'data:audio/wav;base64,' + log.data.audioBase64;
+              dataContent = '';
+              entry.appendChild(audio);
+            } else {
+              dataContent = `<pre>${JSON.stringify(log.data, null, 2)}</pre>`;
+            }
+          } else {
+            // Default case for unknown sources
+            dataContent = `<pre>${JSON.stringify(log.data || {}, null, 2)}</pre>`;
+          }
+
+          // Handle missing or invalid timestamp
+          const timestamp = log.timestamp ? new Date(log.timestamp) : new Date();
+          const timeString = isNaN(timestamp.getTime())
+            ? new Date().toLocaleTimeString()
+            : timestamp.toLocaleTimeString();
+
+          // Handle undefined source and add default styling
+          const source = log.source || 'unknown';
+          const sourceClass = source === 'unknown' ? 'error' : source;
+
+          entry.innerHTML += `
+            <span class="timestamp">[${timeString}]</span>
+            <span class="source ${sourceClass}">[${source}]</span>
+            <span class="type">${log.type || 'unknown'}</span>
+            <span class="data">${dataContent}</span>
+          `;
+          logContent.appendChild(entry);
+          logContent.scrollTop = logContent.scrollHeight;
+
+          // Limit number of log entries to prevent memory issues
+          while (logContent.children.length > 1000) {
+            logContent.removeChild(logContent.firstChild);
+          }
+        }
+      };
 //- [END appengine_websockets_index]
 

@@ -2,10 +2,10 @@
 import { WebSocketServer } from 'ws';
 import { RealtimeClient } from '@openai/realtime-api-beta';
 import { createServer } from 'http';
-import { Server as SocketIOServer } from 'socket.io';
 import express from 'express';
 import wav from 'wav';
 import { PassThrough } from 'stream';
+import { parse } from 'url';
 
 // Import instructions and function schemas
 import { instructions } from '../utils/conversation_config.js';
@@ -15,7 +15,7 @@ export class RealtimeRelay {
   constructor(apiKey) {
     this.apiKey = apiKey;
     this.wss = null; // WebSocketServer for React UI
-    this.io = null; // Socket.IO server for Chemistry3D
+    this.chemistry3dWss = null; // WebSocketServer for Chemistry3D
     this.client = null; // Shared RealtimeClient instance
     this.connectedClients = new Set(); // Set of connected WebSocket clients (React UI)
     this.app = express();
@@ -23,6 +23,7 @@ export class RealtimeRelay {
     this.chemistry3dConnected = false; // Track if Chemistry3D is connected
     this.audioChunks = new Map(); // Store audio chunks per client
     this.logs = []; // Store logs for index.pug
+    this.server = null; // HTTP server
   }
 
   listen(port) {
@@ -35,24 +36,43 @@ export class RealtimeRelay {
       res.render('index', { logs: this.logs }); // Pass logs to index.pug
     });
 
-    // Create an HTTP server with Express
-    const server = createServer(this.app);
+    // Create an HTTP server and attach Express app
+    this.server = createServer();
+    this.server.on('request', this.app);
 
-    // Set up WebSocketServer for React UI on path '/ws'
-    this.wss = new WebSocketServer({ server, path: '/ws' });
+    // Initialize WebSocket servers with noServer option
+    this.wss = new WebSocketServer({ noServer: true });
+    this.chemistry3dWss = new WebSocketServer({ noServer: true });
+
+    // Handle upgrade requests for WebSocket connections
+    this.server.on('upgrade', (request, socket, head) => {
+      const { pathname } = parse(request.url);
+
+      if (pathname === '/ws') {
+        this.wss.handleUpgrade(request, socket, head, (ws) => {
+          this.wss.emit('connection', ws, request);
+        });
+      } else if (pathname === '/chemistry3d') {
+        this.chemistry3dWss.handleUpgrade(request, socket, head, (ws) => {
+          this.chemistry3dWss.emit('connection', ws, request);
+        });
+      } else {
+        socket.destroy();
+      }
+    });
+
+    // Set up WebSocket connection handlers
     this.wss.on('connection', async (ws, req) => {
       this.logEvent('system', 'ws_connection', 'New WebSocket client connected');
       await this.reactConnectionHandler(ws, req);
     });
 
-    // Set up Socket.IO server for Chemistry3D extension (default path '/socket.io')
-    this.io = new SocketIOServer(server);
-    this.io.on('connection', this.chemistry3dConnectionHandler.bind(this));
+    this.chemistry3dWss.on('connection', this.chemistry3dConnectionHandler.bind(this));
 
     // Set up periodic status updates
     setInterval(this.broadcastStatus.bind(this), 5000);
 
-    server.listen(port, () => {
+    this.server.listen(port, () => {
       this.log(`Listening on port ${port}`);
     });
   }
@@ -266,7 +286,9 @@ export class RealtimeRelay {
       }
       // Forward function calls to Chemistry3D
       if (item.type === 'function_call') {
-        this.io.emit('function_call', item);
+        this.chemistry3dWss.clients.forEach((client) => {
+          client.send(JSON.stringify(item));
+        });
       }
     });
 
@@ -312,61 +334,46 @@ export class RealtimeRelay {
     }
   }
 
-  chemistry3dConnectionHandler(socket) {
-    this.log('Chemistry3D extension connected');
-    this.logEvent(
-      'system',
-      'chemistry3d_connection',
-      'Chemistry3D extension connected'
-    );
+  chemistry3dConnectionHandler(ws) {
     this.chemistry3dConnected = true;
+    this.log('Chemistry3D connected via WebSocket.');
 
     // Handle messages from Chemistry3D
-    socket.on('message', (msg) => {
-      this.log(`Received message from Chemistry3D: ${msg}`);
-      this.logEvent('chemistry3d', 'received', { message: msg });
+    ws.on('message', (message) => {
+      // Process messages from Chemistry3D
+      const event = JSON.parse(message);
+      this.logEvent('chemistry3d', 'received', { event });
 
       if (!this.client || !this.client.isConnected()) {
         // Queue message if client isn't connected
-        this.chemistry3dMessageQueue.push(msg);
+        this.chemistry3dMessageQueue.push(event);
         this.log('OpenAI client not connected, message queued');
         return;
       }
 
       // Send message to OpenAI
-      this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
-      this.logEvent('openai', 'sent', { type: 'user_message', content: msg });
-    });
-
-    // Handle function call outputs from Chemistry3D
-    socket.on('function_call_output', (data) => {
-      this.log('Received function call output from Chemistry3D');
-      this.logEvent('chemistry3d', 'function_call_output', data);
-
-      if (!this.client || !this.client.isConnected()) {
-        this.log('No OpenAI client connected');
-        return;
+      if (event.type === 'message') {
+        this.client.sendUserMessageContent([{ type: 'text', text: event.text }]);
+        this.logEvent('openai', 'sent', { type: 'user_message', content: event.text });
+      } else if (event.type === 'function_call_output') {
+        this.client.realtime.send('conversation.item.create', {
+          item: {
+            type: 'function_call_output',
+            call_id: event.call_id,
+            output: event.output,
+          },
+        });
+        // Trigger the assistant to generate the next response
+        this.client.realtime.send('response.create', {});
+      } else {
+        this.log(`Unhandled event type from Chemistry3D: ${event.type}`);
       }
-
-      this.client.realtime.send('conversation.item.create', {
-        item: {
-          type: 'function_call_output',
-          call_id: data.call_id,
-          output: data.output,
-        },
-      });
-      // Trigger the assistant to generate the next response
-      this.client.realtime.send('response.create', {});
     });
 
-    socket.on('disconnect', () => {
-      this.log('Chemistry3D extension disconnected');
-      this.logEvent(
-        'system',
-        'chemistry3d_disconnected',
-        'Chemistry3D extension disconnected'
-      );
+    ws.on('close', () => {
       this.chemistry3dConnected = false;
+      this.log('Chemistry3D disconnected.');
+      this.logEvent('system', 'chemistry3d_disconnected', 'Chemistry3D disconnected');
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
         this.client.disconnect();
@@ -380,9 +387,21 @@ export class RealtimeRelay {
       this.chemistry3dMessageQueue.length > 0 &&
       this.client?.isConnected()
     ) {
-      const msg = this.chemistry3dMessageQueue.shift();
-      this.client.sendUserMessageContent([{ type: 'text', text: msg }]);
-      this.logEvent('openai', 'sent', { type: 'user_message', content: msg });
+      const event = this.chemistry3dMessageQueue.shift();
+      // Process the queued event
+      if (event.type === 'message') {
+        this.client.sendUserMessageContent([{ type: 'text', text: event.text }]);
+        this.logEvent('openai', 'sent', { type: 'user_message', content: event.text });
+      } else if (event.type === 'function_call_output') {
+        this.client.realtime.send('conversation.item.create', {
+          item: {
+            type: 'function_call_output',
+            call_id: event.call_id,
+            output: event.output,
+          },
+        });
+        this.client.realtime.send('response.create', {});
+      }
     }
   }
 
@@ -390,18 +409,21 @@ export class RealtimeRelay {
     const status = {
       isConnected: !!this.client,
       connectedClients: this.connectedClients.size,
+      chemistry3dConnected: this.chemistry3dConnected,
       timestamp: new Date().toISOString(),
     };
-    this.io.emit('status', status);
-    // Broadcast status to React UI via WebSocket
     const statusEvent = {
       type: 'status',
       ...status,
     };
+    // Send status to React clients
     for (const clientWs of this.connectedClients) {
       clientWs.send(JSON.stringify(statusEvent));
-      this.logEvent('react', 'sent', { type: 'status', data: status });
     }
+    // Send status to Chemistry3D clients
+    this.chemistry3dWss.clients.forEach((client) => {
+      client.send(JSON.stringify(statusEvent));
+    });
   }
 
   log(...args) {
@@ -409,11 +431,15 @@ export class RealtimeRelay {
   }
 
   logEvent(source, type, data) {
-    this.io.emit('log', {
-      source,
-      type,
-      data,
-      timestamp: new Date().toISOString(),
+    this.chemistry3dWss.clients.forEach((client) => {
+      client.send(
+        JSON.stringify({
+          source,
+          type,
+          data,
+          timestamp: new Date().toISOString(),
+        })
+      );
     });
     // Store logs for index.pug
     this.logs.push({
