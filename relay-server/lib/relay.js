@@ -24,6 +24,7 @@ export class RealtimeRelay {
     this.audioChunks = new Map(); // Store audio chunks per client
     this.logs = []; // Store logs for index.pug
     this.server = null; // HTTP server
+    this.monitorWss = null; // WebSocketServer for Monitor clients
   }
 
   listen(port) {
@@ -43,6 +44,7 @@ export class RealtimeRelay {
     // Initialize WebSocket servers with noServer option
     this.wss = new WebSocketServer({ noServer: true });
     this.chemistry3dWss = new WebSocketServer({ noServer: true });
+    this.monitorWss = new WebSocketServer({ noServer: true });
 
     // Handle upgrade requests for WebSocket connections
     this.server.on('upgrade', (request, socket, head) => {
@@ -56,6 +58,10 @@ export class RealtimeRelay {
         this.chemistry3dWss.handleUpgrade(request, socket, head, (ws) => {
           this.chemistry3dWss.emit('connection', ws, request);
         });
+      } else if (pathname === '/monitor') {
+        this.monitorWss.handleUpgrade(request, socket, head, (ws) => {
+          this.monitorWss.emit('connection', ws, request);
+        });
       } else {
         socket.destroy();
       }
@@ -68,6 +74,7 @@ export class RealtimeRelay {
     });
 
     this.chemistry3dWss.on('connection', this.chemistry3dConnectionHandler.bind(this));
+    this.monitorWss.on('connection', this.monitorConnectionHandler.bind(this));
 
     // Set up periodic status updates
     setInterval(this.broadcastStatus.bind(this), 5000);
@@ -382,6 +389,14 @@ export class RealtimeRelay {
     });
   }
 
+  monitorConnectionHandler(ws) {
+    this.log('Monitor client connected via WebSocket.');
+
+    ws.on('close', () => {
+      this.log('Monitor client disconnected.');
+    });
+  }
+
   processQueuedMessages() {
     while (
       this.chemistry3dMessageQueue.length > 0 &&
@@ -424,6 +439,10 @@ export class RealtimeRelay {
     this.chemistry3dWss.clients.forEach((client) => {
       client.send(JSON.stringify(statusEvent));
     });
+    // Send status to Monitor clients
+    this.monitorWss.clients.forEach((client) => {
+      client.send(JSON.stringify(statusEvent));
+    });
   }
 
   log(...args) {
@@ -431,23 +450,20 @@ export class RealtimeRelay {
   }
 
   logEvent(source, type, data) {
-    this.chemistry3dWss.clients.forEach((client) => {
-      client.send(
-        JSON.stringify({
-          source,
-          type,
-          data,
-          timestamp: new Date().toISOString(),
-        })
-      );
-    });
-    // Store logs for index.pug
-    this.logs.push({
+    const logMessage = {
       source,
       type,
       data,
       timestamp: new Date().toISOString(),
+    };
+    
+    // Send logs to Monitor clients
+    this.monitorWss.clients.forEach((client) => {
+      client.send(JSON.stringify(logMessage));
     });
+    
+    // Store logs for index.pug
+    this.logs.push(logMessage);
 
     // Also log to console for backend visibility
     this.log(`[${source}] ${type}:`, data);
