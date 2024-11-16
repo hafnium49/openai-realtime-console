@@ -190,9 +190,11 @@ export class RealtimeRelay {
             }
           } else if (event.type === 'conversation.item.create') {
             // Send message to OpenAI
-            this.client.sendUserMessageContent([
-              { type: 'text', text: event.item.text },
-            ]);
+            this.client.realtime.send('conversation.item.create', { item: event.item });
+            this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.item });
+          } else if (event.type === 'response.create') {
+            this.client.realtime.send('response.create', {});
+            this.logEvent('openai', 'sent', { type: 'response.create' });
           } else if (event.type === 'session.update') {
             // Update session parameters
             this.client.updateSession(event.session);
@@ -359,9 +361,13 @@ export class RealtimeRelay {
       }
 
       // Send message to OpenAI
-      if (event.type === 'message') {
-        this.client.sendUserMessageContent([{ type: 'text', text: event.text }]);
-        this.logEvent('openai', 'sent', { type: 'user_message', content: event.text });
+      if (event.type === 'log') {
+        // Send 'conversation.item.create' event to Realtime API
+        this.client.realtime.send('conversation.item.create', { item: event.message });
+        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.message });
+      } else if (event.type === 'response.create') {
+        this.client.realtime.send('response.create', {});
+        this.logEvent('openai', 'sent', { type: 'response.create' });
       } else if (event.type === 'function_call_output') {
         this.client.realtime.send('conversation.item.create', {
           item: {
@@ -370,14 +376,7 @@ export class RealtimeRelay {
             output: event.output,
           },
         });
-        // Trigger the assistant to generate the next response
         this.client.realtime.send('response.create', {});
-      } else if (event.type === 'log') {
-        const text = event.message;
-        // Send to OpenAI
-        this.client.sendUserMessageContent([{ type: 'text', text: text }]);
-        this.logEvent('chemistry3d', 'log', { message: text });
-        this.logEvent('openai', 'sent', { type: 'user_message', content: text });
       } else {
         this.log(`Unhandled event type from Chemistry3D: ${event.type}`);
       }
@@ -410,9 +409,12 @@ export class RealtimeRelay {
     ) {
       const event = this.chemistry3dMessageQueue.shift();
       // Process the queued event
-      if (event.type === 'message') {
-        this.client.sendUserMessageContent([{ type: 'text', text: event.text }]);
-        this.logEvent('openai', 'sent', { type: 'user_message', content: event.text });
+      if (event.type === 'log') {
+        this.client.realtime.send('conversation.item.create', { item: event.message });
+        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.message });
+      } else if (event.type === 'response.create') {
+        this.client.realtime.send('response.create', {});
+        this.logEvent('openai', 'sent', { type: 'response.create' });
       } else if (event.type === 'function_call_output') {
         this.client.realtime.send('conversation.item.create', {
           item: {
@@ -422,11 +424,6 @@ export class RealtimeRelay {
           },
         });
         this.client.realtime.send('response.create', {});
-      } else if (event.type === 'log') {
-        const text = event.message;
-        this.client.sendUserMessageContent([{ type: 'text', text: text }]);
-        this.logEvent('chemistry3d', 'log', { message: text });
-        this.logEvent('openai', 'sent', { type: 'user_message', content: text });
       } else {
         this.log(`Unhandled event type in queued messages: ${event.type}`);
       }
