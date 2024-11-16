@@ -372,6 +372,12 @@ export class RealtimeRelay {
         });
         // Trigger the assistant to generate the next response
         this.client.realtime.send('response.create', {});
+      } else if (event.type === 'log') {
+        const text = event.message;
+        // Send to OpenAI
+        this.client.sendUserMessageContent([{ type: 'text', text: text }]);
+        this.logEvent('chemistry3d', 'log', { message: text });
+        this.logEvent('openai', 'sent', { type: 'user_message', content: text });
       } else {
         this.log(`Unhandled event type from Chemistry3D: ${event.type}`);
       }
@@ -416,6 +422,13 @@ export class RealtimeRelay {
           },
         });
         this.client.realtime.send('response.create', {});
+      } else if (event.type === 'log') {
+        const text = event.message;
+        this.client.sendUserMessageContent([{ type: 'text', text: text }]);
+        this.logEvent('chemistry3d', 'log', { message: text });
+        this.logEvent('openai', 'sent', { type: 'user_message', content: text });
+      } else {
+        this.log(`Unhandled event type in queued messages: ${event.type}`);
       }
     }
   }
@@ -456,12 +469,12 @@ export class RealtimeRelay {
       data,
       timestamp: new Date().toISOString(),
     };
-    
+
     // Send logs to Monitor clients
     this.monitorWss.clients.forEach((client) => {
       client.send(JSON.stringify(logMessage));
     });
-    
+
     // Store logs for index.pug
     this.logs.push(logMessage);
 
