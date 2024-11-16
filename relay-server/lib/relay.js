@@ -25,6 +25,7 @@ export class RealtimeRelay {
     this.logs = []; // Store logs for index.pug
     this.server = null; // HTTP server
     this.monitorWss = null; // WebSocketServer for Monitor clients
+    this.pendingFunctionCalls = new Map(); // Map of call_id to promise resolvers
   }
 
   listen(port) {
@@ -240,28 +241,36 @@ export class RealtimeRelay {
       input_audio_format: 'pcm16', // Ensure audio format is set correctly
     });
 
-    // Add function tools from functionSchemas
+    // Add tools using client.addTool()
     functionSchemas.forEach((tool) => {
       this.client.addTool(tool, async (args) => {
-        // Implement function handler
-        const functionName = tool.name;
-        switch (functionName) {
-          case 'add_pickmove_task':
-            this.log('Executing add_pickmove_task with args:', args);
-            // Simulate processing
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'PickMove task added successfully.' };
-          case 'add_pour_task':
-            this.log('Executing add_pour_task with args:', args);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'Pour task added successfully.' };
-          case 'add_return_task':
-            this.log('Executing add_return_task with args:', args);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            return { message: 'Return task added successfully.' };
-          default:
-            return { error: `Unknown function: ${functionName}` };
-        }
+        // Generate a unique call_id
+        const call_id = 'call_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+        // Create a promise that will be resolved when the response is received
+        const resultPromise = new Promise((resolve, reject) => {
+          this.pendingFunctionCalls.set(call_id, { resolve, reject });
+        });
+
+        // Send function call to Chemistry3D client
+        const functionCall = {
+          type: 'function_call',
+          id: call_id,
+          function: {
+            name: tool.name,
+            arguments: JSON.stringify(args),
+          },
+        };
+
+        // Send function call to Chemistry3D client
+        this.chemistry3dWss.clients.forEach((client) => {
+          client.send(JSON.stringify(functionCall));
+        });
+
+        // Wait for the response
+        const result = await resultPromise;
+
+        return result;
       });
     });
 
@@ -360,15 +369,16 @@ export class RealtimeRelay {
         return;
       }
 
-      // Send message to OpenAI
-      if (event.type === 'log') {
-        // Send 'conversation.item.create' event to Realtime API
-        this.client.realtime.send('conversation.item.create', { item: event.message });
-        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.message });
-      } else if (event.type === 'response.create') {
-        this.client.realtime.send('response.create', {});
-        this.logEvent('openai', 'sent', { type: 'response.create' });
-      } else if (event.type === 'function_call_output') {
+      if (event.type === 'function_call_output') {
+        // Resolve the pending function call
+        const pendingCall = this.pendingFunctionCalls.get(event.call_id);
+        if (pendingCall) {
+          this.pendingFunctionCalls.delete(event.call_id);
+          pendingCall.resolve(event.output);
+        } else {
+          this.log(`No pending function call found for call_id: ${event.call_id}`);
+        }
+        // Also, send the function_call_output back to OpenAI
         this.client.realtime.send('conversation.item.create', {
           item: {
             type: 'function_call_output',
@@ -377,6 +387,10 @@ export class RealtimeRelay {
           },
         });
         this.client.realtime.send('response.create', {});
+      } else if (event.type === 'message') {
+        // Send 'conversation.item.create' event to Realtime API
+        this.client.realtime.send('conversation.item.create', { item: event });
+        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event });
       } else {
         this.log(`Unhandled event type from Chemistry3D: ${event.type}`);
       }
@@ -409,13 +423,19 @@ export class RealtimeRelay {
     ) {
       const event = this.chemistry3dMessageQueue.shift();
       // Process the queued event
-      if (event.type === 'log') {
-        this.client.realtime.send('conversation.item.create', { item: event.message });
-        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.message });
-      } else if (event.type === 'response.create') {
-        this.client.realtime.send('response.create', {});
-        this.logEvent('openai', 'sent', { type: 'response.create' });
+      if (event.type === 'message') {
+        this.client.realtime.send('conversation.item.create', { item: event });
+        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event });
       } else if (event.type === 'function_call_output') {
+        // Resolve the pending function call
+        const pendingCall = this.pendingFunctionCalls.get(event.call_id);
+        if (pendingCall) {
+          this.pendingFunctionCalls.delete(event.call_id);
+          pendingCall.resolve(event.output);
+        } else {
+          this.log(`No pending function call found for call_id: ${event.call_id}`);
+        }
+        // Also, send the function_call_output back to OpenAI
         this.client.realtime.send('conversation.item.create', {
           item: {
             type: 'function_call_output',
