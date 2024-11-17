@@ -4,6 +4,11 @@ import express from 'express';
 import path from 'path';
 import { createServer } from 'http';
 import { RealtimeRelay } from './lib/relay.js';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 8081;
