@@ -33,3 +33,6 @@ yarn-error.log*
 .ipynb_checkpoints/
 
 *Zone.Identifier
+
+.gcloudignore
+src/node_modules
