@@ -1,7 +1,6 @@
 // relay.js
 import { WebSocketServer } from 'ws';
 import { RealtimeClient } from '@openai/realtime-api-beta';
-import { createServer } from 'http';
 import express from 'express';
 import wav from 'wav';
 import { PassThrough } from 'stream';
@@ -18,29 +17,17 @@ export class RealtimeRelay {
     this.chemistry3dWss = null; // WebSocketServer for Chemistry3D
     this.client = null; // Shared RealtimeClient instance
     this.connectedClients = new Set(); // Set of connected WebSocket clients (React UI)
-    this.app = express();
     this.chemistry3dMessageQueue = []; // Message queue for Chemistry3D
     this.chemistry3dConnected = false; // Track if Chemistry3D is connected
     this.audioChunks = new Map(); // Store audio chunks per client
-    this.logs = []; // Store logs for index.pug
+    this.logs = []; // Store logs
     this.server = null; // HTTP server
     this.monitorWss = null; // WebSocketServer for Monitor clients
     this.pendingFunctionCalls = new Map(); // Map of call_id to promise resolvers
   }
 
-  listen(port) {
-    // Set up Express with Pug
-    this.app.set('view engine', 'pug');
-    this.app.set('views', './relay-server/views');
-
-    // Serve the index page
-    this.app.get('/', (req, res) => {
-      res.render('index', { logs: this.logs }); // Pass logs to index.pug
-    });
-
-    // Create an HTTP server and attach Express app
-    this.server = createServer();
-    this.server.on('request', this.app);
+  listen(server) {
+    this.server = server;
 
     // Initialize WebSocket servers with noServer option
     this.wss = new WebSocketServer({ noServer: true });
@@ -79,10 +66,6 @@ export class RealtimeRelay {
 
     // Set up periodic status updates
     setInterval(this.broadcastStatus.bind(this), 5000);
-
-    this.server.listen(port, () => {
-      this.log(`Listening on port ${port}`);
-    });
   }
 
   async reactConnectionHandler(ws, req) {
@@ -192,7 +175,10 @@ export class RealtimeRelay {
           } else if (event.type === 'conversation.item.create') {
             // Send message to OpenAI
             this.client.realtime.send('conversation.item.create', { item: event.item });
-            this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event.item });
+            this.logEvent('openai', 'sent', {
+              type: 'conversation.item.create',
+              item: event.item,
+            });
           } else if (event.type === 'response.create') {
             this.client.realtime.send('response.create', {});
             this.logEvent('openai', 'sent', { type: 'response.create' });
@@ -245,7 +231,11 @@ export class RealtimeRelay {
     functionSchemas.forEach((tool) => {
       this.client.addTool(tool, async (args) => {
         // Generate a unique call_id
-        const call_id = 'call_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        const call_id =
+          'call_' +
+          Date.now() +
+          '_' +
+          Math.random().toString(36).substr(2, 9);
 
         // Create a promise that will be resolved when the response is received
         const resultPromise = new Promise((resolve, reject) => {
@@ -390,7 +380,10 @@ export class RealtimeRelay {
       } else if (event.type === 'message') {
         // Send 'conversation.item.create' event to Realtime API
         this.client.realtime.send('conversation.item.create', { item: event });
-        this.logEvent('openai', 'sent', { type: 'conversation.item.create', item: event });
+        this.logEvent('openai', 'sent', {
+          type: 'conversation.item.create',
+          item: event,
+        });
       } else {
         this.log(`Unhandled event type from Chemistry3D: ${event.type}`);
       }
@@ -417,10 +410,7 @@ export class RealtimeRelay {
   }
 
   processQueuedMessages() {
-    while (
-      this.chemistry3dMessageQueue.length > 0 &&
-      this.client?.isConnected()
-    ) {
+    while (this.chemistry3dMessageQueue.length > 0 && this.client?.isConnected()) {
       const event = this.chemistry3dMessageQueue.shift();
       // Process the queued event
       if (event.type === 'message') {
@@ -492,7 +482,7 @@ export class RealtimeRelay {
       client.send(JSON.stringify(logMessage));
     });
 
-    // Store logs for index.pug
+    // Store logs
     this.logs.push(logMessage);
 
     // Also log to console for backend visibility

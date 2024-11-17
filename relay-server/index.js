@@ -2,6 +2,7 @@
 
 import express from 'express';
 import path from 'path';
+import { createServer } from 'http';
 import { RealtimeRelay } from './lib/relay.js';
 
 const app = express();
@@ -15,8 +16,11 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
+// Create the server
+const server = createServer(app);
+
 // Start the server
-const server = app.listen(port, () => {
+server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });
 
