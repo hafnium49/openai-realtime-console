@@ -1,18 +1,26 @@
+// relay-server/index.js
+
+import express from 'express';
+import path from 'path';
 import { RealtimeRelay } from './lib/relay.js';
-import dotenv from 'dotenv';
-dotenv.config({ override: true });
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const app = express();
+const port = process.env.PORT || 8081;
 
-if (!OPENAI_API_KEY) {
-  console.error(
-    `Environment variable "OPENAI_API_KEY" is required.\n` +
-      `Please set it in your .env file.`
-  );
-  process.exit(1);
-}
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, '../build')));
 
-const PORT = parseInt(process.env.PORT) || 8081;
+// For any other requests, send back the React index.html file
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../build', 'index.html'));
+});
 
-const relay = new RealtimeRelay(OPENAI_API_KEY);
-relay.listen(PORT);
+// Start the server
+const server = app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
+
+// Initialize the RealtimeRelay
+const apiKey = process.env.OPENAI_API_KEY;
+const relay = new RealtimeRelay(apiKey);
+relay.listen(server);
