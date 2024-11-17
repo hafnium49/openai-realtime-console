@@ -1,4 +1,8 @@
-runtime: nodejs
+runtime: nodejs20
+env: flex
+
+env_variables:
+  OPENAI_API_KEY: "sk-xxxxxx"
 
 network:
   session_affinity: true
