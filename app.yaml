@@ -1,0 +1,11 @@
+runtime: nodejs
+
+network:
+  session_affinity: true
+
+manual_scaling:
+  instances: 1
+
+handlers:
+- url: /.*
+  script: auto
