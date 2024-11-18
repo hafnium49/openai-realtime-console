@@ -1,10 +1,9 @@
 // relay.js
 import { WebSocketServer } from 'ws';
 import { RealtimeClient } from '@openai/realtime-api-beta';
-import express from 'express';
 import wav from 'wav';
 import { PassThrough } from 'stream';
-import { parse } from 'url';
+import { URL } from 'url';
 
 // Import instructions and function schemas
 import { instructions } from '../utils/conversation_config.js';
@@ -36,7 +35,7 @@ export class RealtimeRelay {
 
     // Handle upgrade requests for WebSocket connections
     this.server.on('upgrade', (request, socket, head) => {
-      const { pathname } = parse(request.url);
+      const pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
 
       if (pathname === '/ws') {
         this.wss.handleUpgrade(request, socket, head, (ws) => {
@@ -205,8 +204,10 @@ export class RealtimeRelay {
       this.connectedClients.delete(ws);
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
-        this.client.disconnect();
-        this.client = null;
+        if (this.client) {
+          this.client.disconnect();
+          this.client = null;
+        }
       }
     });
   }
@@ -215,7 +216,7 @@ export class RealtimeRelay {
     if (!this.apiKey) {
       throw new Error('API key is undefined.');
     }
-    
+
     this.log(
       `Connecting to OpenAI Realtime API with key "${this.apiKey.slice(
         0,
@@ -399,8 +400,10 @@ export class RealtimeRelay {
       this.logEvent('system', 'chemistry3d_disconnected', 'Chemistry3D disconnected');
       if (this.connectedClients.size === 0 && !this.chemistry3dConnected) {
         // Disconnect from OpenAI when no clients are connected
-        this.client.disconnect();
-        this.client = null;
+        if (this.client) {
+          this.client.disconnect();
+          this.client = null;
+        }
       }
     });
   }
