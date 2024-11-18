@@ -212,6 +212,10 @@ export class RealtimeRelay {
   }
 
   async initializeOpenAIClient(ws) {
+    if (!this.apiKey) {
+      throw new Error('API key is undefined.');
+    }
+    
     this.log(
       `Connecting to OpenAI Realtime API with key "${this.apiKey.slice(
         0,

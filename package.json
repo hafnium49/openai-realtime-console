@@ -7,6 +7,7 @@
     "node": ">=16.0.0"
   },
   "dependencies": {
+    "@google-cloud/secret-manager": "^5.0.0",
     "@openai/realtime-api-beta": "github:openai/openai-realtime-api-beta",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
