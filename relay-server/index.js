@@ -39,10 +39,13 @@ async function getOpenAIApiKey() {
 
   // If not found, try to get it from Secret Manager
   try {
+    // This is the key change for App Engine!
     const client = new SecretManagerServiceClient();
-
-    // This is where you specify the correct secret name:
-    const name = 'projects/929524284792/secrets/OPENAI_API_KEY/versions/latest'; 
+    
+    // Get the project ID from the environment variable
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT; 
+    const secretName = 'OPENAI_API_KEY'; 
+    const name = `projects/${projectId}/secrets/${secretName}/versions/1`; //latest`;
 
     const [version] = await client.accessSecretVersion({ name });
     const apiKey = version.payload.data.toString('utf8');
