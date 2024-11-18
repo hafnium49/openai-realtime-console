@@ -38,21 +38,21 @@ async function getOpenAIApiKey() {
   }
 
   // If not found, try to get it from Secret Manager
-  const client = new SecretManagerServiceClient();
-
   try {
-    // Get the project ID
-    const projectId = await client.getProjectId();
-    const secretName = 'OPENAI_API_KEY'; // The name of your secret in Secret Manager
+    // This is the key change for App Engine!
+    const client = new SecretManagerServiceClient();
+    
+    // Get the project ID from the environment variable
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT; 
+    const secretName = 'OPENAI_API_KEY'; 
     const name = `projects/${projectId}/secrets/${secretName}/versions/latest`;
 
-    // Access the secret
     const [version] = await client.accessSecretVersion({ name });
     const apiKey = version.payload.data.toString('utf8');
     return apiKey;
   } catch (error) {
     console.error('Error accessing Secret Manager:', error);
-    throw error;
+    throw error; 
   }
 }
 
