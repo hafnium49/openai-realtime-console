@@ -12,9 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-
-// Change the port to process.env.PORT || 8080
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 8081;
 
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../build')));
@@ -41,20 +39,20 @@ async function getOpenAIApiKey() {
 
   // If not found, try to get it from Secret Manager
   try {
+    // This is the key change for App Engine!
     const client = new SecretManagerServiceClient();
+    
+    // Get the project ID from the environment variable
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT; 
+    const secretName = 'OPENAI_API_KEY'; 
+    const name = `projects/${projectId}/secrets/${secretName}/versions/1`; //latest`;
 
-    // Get the project ID
-    const projectId = await client.getProjectId();
-    const secretName = 'OPENAI_API_KEY';
-    const name = `projects/${projectId}/secrets/${secretName}/versions/latest`;
-
-    // Access the secret version
     const [version] = await client.accessSecretVersion({ name });
     const apiKey = version.payload.data.toString('utf8');
     return apiKey;
   } catch (error) {
     console.error('Error accessing Secret Manager:', error);
-    throw error;
+    throw error; 
   }
 }
 
