@@ -14,15 +14,6 @@ const __dirname = dirname(__filename);
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Add Content Security Policy middleware
-app.use((req, res, next) => {
-  res.setHeader(
-    'Content-Security-Policy',
-    "script-src 'self' 'unsafe-eval'"
-  );
-  next();
-});
-
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../build')));
 
