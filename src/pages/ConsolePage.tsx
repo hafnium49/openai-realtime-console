@@ -139,13 +139,8 @@ export function ConsolePage() {
     // Connect to audio output
     await wavStreamPlayer.connect();
 
-    // Update WebSocket URL construction based on environment
-    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = process.env.NODE_ENV === 'production'
-      ? `${wsScheme}://${window.location.host}/ws`
-      : 'ws://localhost:8080/ws';
-
     // Connect to relay server using standard WebSocket
+    const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
@@ -276,7 +271,7 @@ export function ConsolePage() {
     } catch (error) {
       console.error('Error accessing microphone:', error);
     }
-  }, [outputAudioChunks]);
+  }, []);
 
   /**
    * Disconnect and reset conversation state
