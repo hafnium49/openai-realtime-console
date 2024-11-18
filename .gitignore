@@ -36,3 +36,4 @@ yarn-error.log*
 
 .gcloudignore
 src/node_modules
+app.yaml
