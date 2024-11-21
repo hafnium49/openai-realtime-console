@@ -139,8 +139,11 @@ export function ConsolePage() {
     // Connect to audio output
     await wavStreamPlayer.connect();
 
-    // Connect to relay server using standard WebSocket
-    const wsUrl = `${process.env.REACT_APP_LOCAL_RELAY_SERVER_URL}/ws`;
+    // Determine the appropriate WebSocket protocol
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+
+    // Connect to localhost to avoid requiring HTTPS for WebSocket
+    const wsUrl = `${wsProtocol}localhost:${process.env.REACT_APP_RELAY_SERVER_PORT || '8000'}/ws`;
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
