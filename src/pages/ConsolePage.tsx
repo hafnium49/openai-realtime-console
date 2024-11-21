@@ -140,10 +140,14 @@ export function ConsolePage() {
     await wavStreamPlayer.connect();
 
     // Determine the appropriate WebSocket protocol
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
 
-    // Connect to localhost to avoid requiring HTTPS for WebSocket
-    const wsUrl = `${wsProtocol}localhost:${process.env.REACT_APP_RELAY_SERVER_PORT || '8000'}/ws`;
+    // Use the same host (including port if specified)
+    const host = window.location.host;
+
+    // Build the WebSocket URL using the same host and protocol
+    const wsUrl = `${wsProtocol}://${host}/ws`;
+
     const ws = new WebSocket(wsUrl);
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
