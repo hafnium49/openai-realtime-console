@@ -239,7 +239,7 @@ export class RealtimeRelay {
       instructions: instructions,
       input_audio_transcription: { model: 'whisper-1' },
       input_audio_format: 'pcm16', // Ensure audio format is set correctly
-      temperature: 0.7
+      // temperature: 0.7
     });
 
     // Add tools using client.addTool()
