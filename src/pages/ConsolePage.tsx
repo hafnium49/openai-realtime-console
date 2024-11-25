@@ -103,6 +103,9 @@ export function ConsolePage() {
   const [outputAudioChunks, setOutputAudioChunks] = useState<{ [key: string]: Int16Array[] }>({});
   const [outputAudioBlobs, setOutputAudioBlobs] = useState<{ [key: string]: Blob }>({});
 
+  // Add state for turn end type ('none' for manual, 'server_vad' for VAD mode)
+  const [turnEndType, setTurnEndType] = useState('none');
+
   /**
    * Utility for formatting the timing of logs
    */
@@ -145,7 +148,7 @@ export function ConsolePage() {
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
-    ws.onopen = () => {
+    ws.onopen = async () => {
       console.log('Connected to relay server');
       // Send initial message to OpenAI via relay server
       const initialMessage = {
@@ -157,6 +160,19 @@ export function ConsolePage() {
         },
       };
       ws.send(JSON.stringify(initialMessage));
+
+      // Connect to microphone
+      try {
+        await wavRecorder.begin();
+
+        // If in VAD mode, start recording
+        if (turnEndType === 'server_vad') {
+          console.log('Starting recording in VAD mode');
+          await startRecording();
+        }
+      } catch (error) {
+        console.error('Error accessing microphone:', error);
+      }
     };
 
     ws.onerror = (error) => {
@@ -264,14 +280,7 @@ export function ConsolePage() {
       console.log('Disconnected from relay server');
       setIsConnected(false);
     };
-
-    // Connect to microphone
-    try {
-      await wavRecorder.begin();
-    } catch (error) {
-      console.error('Error accessing microphone:', error);
-    }
-  }, []);
+  }, [turnEndType]);
 
   /**
    * Disconnect and reset conversation state
@@ -288,6 +297,9 @@ export function ConsolePage() {
     setMarker(null);
 
     const wavRecorder = wavRecorderRef.current;
+    if (wavRecorder.getStatus() === 'recording') {
+      await wavRecorder.pause();
+    }
     await wavRecorder.end();
 
     const wavStreamPlayer = wavStreamPlayerRef.current;
@@ -308,8 +320,6 @@ export function ConsolePage() {
     audioChunksRef.current = []; // Reset audio chunks
     try {
       await wavRecorder.record((data) => {
-        console.log('wavRecorder.record callback called');
-        console.log('Received data:', data);
         if (!data || !data.mono || !data.mono.byteLength) {
           console.error('Received undefined or invalid data from the recorder');
           return;
@@ -317,7 +327,6 @@ export function ConsolePage() {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           // Convert data.mono (ArrayBuffer) to Int16Array
           const int16Samples = new Int16Array(data.mono);
-          console.log('Sending audio chunk:', int16Samples.length * 2, 'bytes');
           wsRef.current.send(int16Samples);
           audioChunksRef.current.push(int16Samples);
 
@@ -346,41 +355,43 @@ export function ConsolePage() {
     if (wavRecorder.getStatus() === 'recording') {
       try {
         await wavRecorder.pause();
-        
+
         if (wsRef.current?.readyState === WebSocket.OPEN) {
-          // Send audio commit event
-          const commitEvent = {
-            type: 'audio_commit',
-          };
-          wsRef.current.send(JSON.stringify(commitEvent));
+          if (turnEndType === 'none') {
+            // Manual mode: Send audio_commit event and save recording
+            const commitEvent = {
+              type: 'audio_commit',
+            };
+            wsRef.current.send(JSON.stringify(commitEvent));
 
-          // Save current recording
-          const result = await wavRecorder.save();
-          const audioBlob = result.blob;
+            // Save current recording
+            const result = await wavRecorder.save();
+            const audioBlob = result.blob;
 
-          // Store the blob with a unique key
-          const timestamp = Date.now().toString();
-          setAudioBlobs((prevBlobs) => ({
-            ...prevBlobs,
-            [timestamp]: audioBlob,
-          }));
+            // Store the blob with a unique key
+            const timestamp = Date.now().toString();
+            setAudioBlobs((prevBlobs) => ({
+              ...prevBlobs,
+              [timestamp]: audioBlob,
+            }));
 
-          // Add an event to realtimeEvents
-          const realtimeEvent: RealtimeEvent = {
-            time: new Date().toISOString(),
-            source: 'client',
-            event: {
-              type: 'audio_recording',
-              audioBlobKey: timestamp,
-            },
-          };
-          setRealtimeEvents((prev) => [...prev, realtimeEvent]);
+            // Add an event to realtimeEvents
+            const realtimeEvent: RealtimeEvent = {
+              time: new Date().toISOString(),
+              source: 'client',
+              event: {
+                type: 'audio_recording',
+                audioBlobKey: timestamp,
+              },
+            };
+            setRealtimeEvents((prev) => [...prev, realtimeEvent]);
 
-          // Clear audio chunks
-          audioChunksRef.current = [];
+            // Clear audio chunks
+            audioChunksRef.current = [];
 
-          // Clear wavRecorder's internal buffer
-          await wavRecorder.clear();
+            // Clear wavRecorder's internal buffer
+            await wavRecorder.clear();
+          }
         }
       } catch (error) {
         console.error('Error stopping recording:', error);
@@ -393,7 +404,8 @@ export function ConsolePage() {
   /**
    * Switch between Manual <> VAD mode for communication
    */
-  const changeTurnEndType = (value: string) => {
+  const changeTurnEndType = async (value: string) => {
+    setTurnEndType(value);
     setCanPushToTalk(value === 'none');
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       // Update session with turn detection settings
@@ -404,6 +416,20 @@ export function ConsolePage() {
         },
       };
       wsRef.current.send(JSON.stringify(sessionUpdate));
+
+      // Start or stop recording based on the new mode
+      const wavRecorder = wavRecorderRef.current;
+      if (value === 'server_vad') {
+        // Start recording if not already recording
+        if (wavRecorder.getStatus() !== 'recording') {
+          await startRecording();
+        }
+      } else {
+        // In manual mode, stop recording if currently recording
+        if (wavRecorder.getStatus() === 'recording') {
+          await wavRecorder.pause();
+        }
+      }
     }
   };
 
