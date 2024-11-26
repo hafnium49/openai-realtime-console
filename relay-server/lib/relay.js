@@ -240,7 +240,7 @@ export class RealtimeRelay {
       input_audio_transcription: { model: 'whisper-1' },
       input_audio_format: 'pcm16', // Ensure audio format is set correctly
       // temperature: 0.7,
-      max_response_output_tokens: 8192, // 4096
+      // max_response_output_tokens: 8192, // 4096
     });
 
     // Add tools using client.addTool()
