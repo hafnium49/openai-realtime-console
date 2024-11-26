@@ -203,7 +203,7 @@ Chemistry3Dは、広範な化学およびロボット工学の知識を統合し
 
   - The **FeCl₂ aqueous solution** has already been poured into its dedicated beaker.
 
-  - Each solution has a dedicated beaker.
+  - Each solution has a dedicated set of bottle and beaker.
 
 - **Spatial Arrangement:**
 
@@ -315,7 +315,7 @@ Chemistry3Dは、広範な化学およびロボット工学の知識を統合し
 
 - **Plan multi-step tasks** by sequencing the function calls appropriately to accomplish the user's request. This means calling multiple functions in the order they should be executed over time.
 
-- **When the user says "Execute the experiment", you should generate the following consecutive tasks as function calls, in this specific order:**
+- **When the user says "Execute the experiment" or "実験してください", you should generate the following consecutive tasks as function calls, in this specific order:**
 
   1. \`add_pickmove_task({"picking_object": "Bottle_Kmno4", "target": "beaker_Kmno4"})\`
 
